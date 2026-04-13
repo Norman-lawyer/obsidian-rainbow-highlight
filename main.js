@@ -51,12 +51,30 @@ function getSelection(editor) {
   if (!cmView)
     return null;
   const sel = cmView.state.selection.main;
-  if (sel.from === sel.to)
+  if (sel.from !== sel.to) {
+    const cmText = cmView.state.sliceDoc(sel.from, sel.to);
+    if (cmText && cmText.trim().length > 0) {
+      return { text: cmText, from: sel.from, to: sel.to };
+    }
+  }
+  const domSel = window.getSelection();
+  if (!domSel || domSel.rangeCount === 0 || domSel.isCollapsed)
     return null;
-  const cmText = cmView.state.sliceDoc(sel.from, sel.to);
-  if (!cmText || cmText.trim().length === 0)
+  const range = domSel.getRangeAt(0);
+  try {
+    const from = cmView.posAtDOM(range.startContainer, range.startOffset);
+    const to = cmView.posAtDOM(range.endContainer, range.endOffset);
+    if (from === to)
+      return null;
+    const docFrom = Math.min(from, to);
+    const docTo = Math.max(from, to);
+    const docText = cmView.state.sliceDoc(docFrom, docTo);
+    if (!docText || docText.trim().length === 0)
+      return null;
+    return { text: docText, from: docFrom, to: docTo };
+  } catch (e) {
     return null;
-  return { text: cmText, from: sel.from, to: sel.to };
+  }
 }
 function replaceRange(editor, replacement, from, to) {
   const cmView = getCmView(editor);

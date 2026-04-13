@@ -36,20 +36,39 @@ function getSelection(editor: Editor): SelectionInfo | null {
       const sel = cmView.state.selection.main;
       return { text, from: sel.from, to: sel.to };
     }
-    // Fallback: compute positions from Obsidian editor API
     const from = editor.getCursor("from");
     const to = editor.getCursor("to");
     return { text, from: editor.posToOffset(from), to: editor.posToOffset(to) };
   }
 
-  // Fallback: read directly from CM6 state (works inside callouts, embeds, etc.)
+  // Fallback: read directly from CM6 state
   const cmView = getCmView(editor);
   if (!cmView) return null;
   const sel = cmView.state.selection.main;
-  if (sel.from === sel.to) return null;
-  const cmText = cmView.state.sliceDoc(sel.from, sel.to);
-  if (!cmText || cmText.trim().length === 0) return null;
-  return { text: cmText, from: sel.from, to: sel.to };
+  if (sel.from !== sel.to) {
+    const cmText = cmView.state.sliceDoc(sel.from, sel.to);
+    if (cmText && cmText.trim().length > 0) {
+      return { text: cmText, from: sel.from, to: sel.to };
+    }
+  }
+
+  // Last resort: map DOM selection to CM6 positions via posAtDOM
+  // This handles rendered widgets like callouts, embeds, etc.
+  const domSel = window.getSelection();
+  if (!domSel || domSel.rangeCount === 0 || domSel.isCollapsed) return null;
+  const range = domSel.getRangeAt(0);
+  try {
+    const from = cmView.posAtDOM(range.startContainer, range.startOffset);
+    const to = cmView.posAtDOM(range.endContainer, range.endOffset);
+    if (from === to) return null;
+    const docFrom = Math.min(from, to);
+    const docTo = Math.max(from, to);
+    const docText = cmView.state.sliceDoc(docFrom, docTo);
+    if (!docText || docText.trim().length === 0) return null;
+    return { text: docText, from: docFrom, to: docTo };
+  } catch {
+    return null;
+  }
 }
 
 function replaceRange(editor: Editor, replacement: string, from: number, to: number) {
