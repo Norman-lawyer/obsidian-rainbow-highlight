@@ -52,20 +52,65 @@ function getSelection(editor: Editor): SelectionInfo | null {
     }
   }
 
-  // Last resort: map DOM selection to CM6 positions via posAtDOM
-  // This handles rendered widgets like callouts, embeds, etc.
+  // Last resort: handle rendered widgets (callouts, embeds, etc.)
+  // posAtDOM may return the entire block range, so we use the DOM
+  // selection text to find the exact position within the block.
   const domSel = window.getSelection();
   if (!domSel || domSel.rangeCount === 0 || domSel.isCollapsed) return null;
+  const domText = domSel.toString();
+  if (!domText || !domText.trim()) return null;
   const range = domSel.getRangeAt(0);
   try {
-    const from = cmView.posAtDOM(range.startContainer, range.startOffset);
-    const to = cmView.posAtDOM(range.endContainer, range.endOffset);
-    if (from === to) return null;
-    const docFrom = Math.min(from, to);
-    const docTo = Math.max(from, to);
-    const docText = cmView.state.sliceDoc(docFrom, docTo);
-    if (!docText || docText.trim().length === 0) return null;
-    return { text: docText, from: docFrom, to: docTo };
+    const pos1 = cmView.posAtDOM(range.startContainer, range.startOffset);
+    const pos2 = cmView.posAtDOM(range.endContainer, range.endOffset);
+    const blockFrom = Math.min(pos1, pos2);
+    const blockTo = Math.max(pos1, pos2);
+
+    // Expand to full callout block boundaries (lines starting with ">")
+    const doc = cmView.state.doc;
+    let searchStart = doc.lineAt(blockFrom).from;
+    let searchEnd = doc.lineAt(blockTo).to;
+    // Expand upward
+    while (searchStart > 0) {
+      const prevLine = doc.lineAt(searchStart - 1);
+      if (prevLine.text.startsWith(">")) {
+        searchStart = prevLine.from;
+      } else {
+        break;
+      }
+    }
+    // Expand downward
+    while (searchEnd < doc.length) {
+      const nextLine = doc.lineAt(searchEnd + 1);
+      if (nextLine.text.startsWith(">")) {
+        searchEnd = nextLine.to;
+      } else {
+        break;
+      }
+    }
+
+    const blockText = doc.sliceString(searchStart, searchEnd);
+
+    // Try exact match of DOM text within the block source
+    const idx = blockText.indexOf(domText);
+    if (idx >= 0) {
+      return { text: domText, from: searchStart + idx, to: searchStart + idx + domText.length };
+    }
+
+    // Handle multiline: DOM text has no "> " prefixes but source does
+    const domLines = domText.split("\n");
+    if (domLines.length > 1) {
+      // Build pattern: first line as-is, subsequent lines prefixed with "> "
+      for (const prefix of ["> ", ">", ">  "]) {
+        const withPrefixes = domLines[0] + "\n" + domLines.slice(1).map(l => prefix + l).join("\n");
+        const idx2 = blockText.indexOf(withPrefixes);
+        if (idx2 >= 0) {
+          return { text: withPrefixes, from: searchStart + idx2, to: searchStart + idx2 + withPrefixes.length };
+        }
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }
