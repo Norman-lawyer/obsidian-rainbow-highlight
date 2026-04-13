@@ -20,7 +20,7 @@ export default class AppleHighlightPlugin extends Plugin {
   private popover: HTMLElement | null = null;
   private selectionHandler: (() => void) | null = null;
 
-  async onload() {
+  onload() {
     // Register the mouseup handler on the workspace
     this.registerDomEvent(document, "mouseup", (evt: MouseEvent) => {
       // Small delay to let the selection finalize
@@ -50,7 +50,7 @@ export default class AppleHighlightPlugin extends Plugin {
     HIGHLIGHT_COLORS.forEach((color) => {
       this.addCommand({
         id: `highlight-${color.class}`,
-        name: `Highlight: ${color.name}`,
+        name: `Highlight: ${color.name.toLowerCase()}`,
         editorCallback: (editor: Editor) => {
           this.applyHighlight(editor, color);
         },
@@ -60,7 +60,7 @@ export default class AppleHighlightPlugin extends Plugin {
     // Add remove highlight command
     this.addCommand({
       id: "remove-highlight",
-      name: "Remove Highlight",
+      name: "Remove highlight",
       editorCallback: (editor: Editor) => {
         this.removeHighlight(editor);
       },
@@ -124,7 +124,24 @@ export default class AppleHighlightPlugin extends Plugin {
     const removeBtn = document.createElement("button");
     removeBtn.addClass("hl-color-circle", "hl-remove-circle");
     removeBtn.setAttribute("aria-label", "Remove highlight");
-    removeBtn.innerHTML = `<svg viewBox="0 0 16 16" width="10" height="10"><line x1="3" y1="3" x2="13" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="13" y1="3" x2="3" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "10");
+    svg.setAttribute("height", "10");
+    const line1 = document.createElementNS(svgNS, "line");
+    line1.setAttribute("x1", "3"); line1.setAttribute("y1", "3");
+    line1.setAttribute("x2", "13"); line1.setAttribute("y2", "13");
+    line1.setAttribute("stroke", "currentColor"); line1.setAttribute("stroke-width", "2");
+    line1.setAttribute("stroke-linecap", "round");
+    const line2 = document.createElementNS(svgNS, "line");
+    line2.setAttribute("x1", "13"); line2.setAttribute("y1", "3");
+    line2.setAttribute("x2", "3"); line2.setAttribute("y2", "13");
+    line2.setAttribute("stroke", "currentColor"); line2.setAttribute("stroke-width", "2");
+    line2.setAttribute("stroke-linecap", "round");
+    svg.appendChild(line1);
+    svg.appendChild(line2);
+    removeBtn.appendChild(svg);
     removeBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
