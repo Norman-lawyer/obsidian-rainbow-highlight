@@ -63,50 +63,22 @@ function getSelection(editor) {
   const domText = domSel.toString();
   if (!domText || !domText.trim())
     return null;
-  const range = domSel.getRangeAt(0);
-  try {
-    const pos1 = cmView.posAtDOM(range.startContainer, range.startOffset);
-    const pos2 = cmView.posAtDOM(range.endContainer, range.endOffset);
-    const blockFrom = Math.min(pos1, pos2);
-    const blockTo = Math.max(pos1, pos2);
-    const doc = cmView.state.doc;
-    let searchStart = doc.lineAt(blockFrom).from;
-    let searchEnd = doc.lineAt(blockTo).to;
-    while (searchStart > 0) {
-      const prevLine = doc.lineAt(searchStart - 1);
-      if (prevLine.text.startsWith(">")) {
-        searchStart = prevLine.from;
-      } else {
-        break;
-      }
-    }
-    while (searchEnd < doc.length) {
-      const nextLine = doc.lineAt(searchEnd + 1);
-      if (nextLine.text.startsWith(">")) {
-        searchEnd = nextLine.to;
-      } else {
-        break;
-      }
-    }
-    const blockText = doc.sliceString(searchStart, searchEnd);
-    const idx = blockText.indexOf(domText);
-    if (idx >= 0) {
-      return { text: domText, from: searchStart + idx, to: searchStart + idx + domText.length };
-    }
-    const domLines = domText.split("\n");
-    if (domLines.length > 1) {
-      for (const prefix of ["> ", ">", ">  "]) {
-        const withPrefixes = domLines[0] + "\n" + domLines.slice(1).map((l) => prefix + l).join("\n");
-        const idx2 = blockText.indexOf(withPrefixes);
-        if (idx2 >= 0) {
-          return { text: withPrefixes, from: searchStart + idx2, to: searchStart + idx2 + withPrefixes.length };
-        }
-      }
-    }
-    return null;
-  } catch (e) {
-    return null;
+  const docStr = cmView.state.doc.toString();
+  let idx = docStr.indexOf(domText);
+  if (idx >= 0) {
+    return { text: domText, from: idx, to: idx + domText.length };
   }
+  const domLines = domText.split("\n");
+  if (domLines.length > 1) {
+    for (const prefix of ["> ", ">", ">  "]) {
+      const withPrefixes = domLines[0] + "\n" + domLines.slice(1).map((l) => prefix + l).join("\n");
+      idx = docStr.indexOf(withPrefixes);
+      if (idx >= 0) {
+        return { text: withPrefixes, from: idx, to: idx + withPrefixes.length };
+      }
+    }
+  }
+  return null;
 }
 function replaceRange(editor, replacement, from, to) {
   const cmView = getCmView(editor);
