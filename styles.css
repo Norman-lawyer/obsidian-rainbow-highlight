@@ -1,19 +1,19 @@
 /* ===== Highlight Colors ===== */
 
-.hl-yellow  { background-color: #fef3c7; color: #946800; border-radius: 3px; padding: 1px 2px; }
-.hl-green   { background-color: #d1fae5; color: #1a6b3c; border-radius: 3px; padding: 1px 2px; }
-.hl-blue    { background-color: #dbeafe; color: #1e5a8a; border-radius: 3px; padding: 1px 2px; }
-.hl-pink    { background-color: #fce7f3; color: #9d174d; border-radius: 3px; padding: 1px 2px; }
-.hl-purple  { background-color: #ede9fe; color: #5b21b6; border-radius: 3px; padding: 1px 2px; }
-.hl-orange  { background-color: #ffedd5; color: #9a3412; border-radius: 3px; padding: 1px 2px; }
+mark.hl-yellow  { background-color: #fef3c7 !important; color: #946800 !important; border-radius: 3px; padding: 1px 2px; }
+mark.hl-green   { background-color: #d1fae5 !important; color: #1a6b3c !important; border-radius: 3px; padding: 1px 2px; }
+mark.hl-blue    { background-color: #dbeafe !important; color: #1e5a8a !important; border-radius: 3px; padding: 1px 2px; }
+mark.hl-pink    { background-color: #fce7f3 !important; color: #9d174d !important; border-radius: 3px; padding: 1px 2px; }
+mark.hl-purple  { background-color: #ede9fe !important; color: #5b21b6 !important; border-radius: 3px; padding: 1px 2px; }
+mark.hl-orange  { background-color: #ffedd5 !important; color: #9a3412 !important; border-radius: 3px; padding: 1px 2px; }
 
 /* Dark theme adjustments */
-.theme-dark .hl-yellow  { background-color: #78560d; color: #fef3c7; }
-.theme-dark .hl-green   { background-color: #14532d; color: #d1fae5; }
-.theme-dark .hl-blue    { background-color: #1e3a5f; color: #dbeafe; }
-.theme-dark .hl-pink    { background-color: #831843; color: #fce7f3; }
-.theme-dark .hl-purple  { background-color: #3b0764; color: #ede9fe; }
-.theme-dark .hl-orange  { background-color: #7c2d12; color: #ffedd5; }
+.theme-dark mark.hl-yellow  { background-color: #78560d !important; color: #fef3c7 !important; }
+.theme-dark mark.hl-green   { background-color: #14532d !important; color: #d1fae5 !important; }
+.theme-dark mark.hl-blue    { background-color: #1e3a5f !important; color: #dbeafe !important; }
+.theme-dark mark.hl-pink    { background-color: #831843 !important; color: #fce7f3 !important; }
+.theme-dark mark.hl-purple  { background-color: #3b0764 !important; color: #ede9fe !important; }
+.theme-dark mark.hl-orange  { background-color: #7c2d12 !important; color: #ffedd5 !important; }
 
 /* ===== Popover ===== */
 
