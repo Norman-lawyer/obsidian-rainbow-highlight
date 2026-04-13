@@ -19,7 +19,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // main.ts
 var main_exports = {};
 __export(main_exports, {
-  default: () => AppleHighlightPlugin
+  default: () => RainbowHighlightPlugin
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
@@ -31,11 +31,48 @@ var HIGHLIGHT_COLORS = [
   { name: "Purple", class: "hl-purple", color: "#5b21b6", bg: "#a78bfa" },
   { name: "Orange", class: "hl-orange", color: "#9a3412", bg: "#fb923c" }
 ];
-var AppleHighlightPlugin = class extends import_obsidian.Plugin {
+function getCmView(editor) {
+  var _a;
+  return (_a = editor.cm) != null ? _a : null;
+}
+function getSelection(editor) {
+  const text = editor.getSelection();
+  if (text && text.trim().length > 0) {
+    const cmView2 = getCmView(editor);
+    if (cmView2) {
+      const sel2 = cmView2.state.selection.main;
+      return { text, from: sel2.from, to: sel2.to };
+    }
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    return { text, from: editor.posToOffset(from), to: editor.posToOffset(to) };
+  }
+  const cmView = getCmView(editor);
+  if (!cmView)
+    return null;
+  const sel = cmView.state.selection.main;
+  if (sel.from === sel.to)
+    return null;
+  const cmText = cmView.state.sliceDoc(sel.from, sel.to);
+  if (!cmText || cmText.trim().length === 0)
+    return null;
+  return { text: cmText, from: sel.from, to: sel.to };
+}
+function replaceRange(editor, replacement, from, to) {
+  const cmView = getCmView(editor);
+  if (cmView) {
+    cmView.dispatch({
+      changes: { from, to, insert: replacement }
+    });
+  } else {
+    editor.replaceSelection(replacement);
+  }
+}
+var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
     this.popover = null;
-    this.selectionHandler = null;
+    this.currentSelection = null;
   }
   onload() {
     this.registerDomEvent(document, "mouseup", (evt) => {
@@ -79,11 +116,12 @@ var AppleHighlightPlugin = class extends import_obsidian.Plugin {
     if (!activeView)
       return;
     const editor = activeView.editor;
-    const selectedText = editor.getSelection();
-    if (!selectedText || selectedText.trim().length === 0) {
+    const selInfo = getSelection(editor);
+    if (!selInfo) {
       this.removePopover();
       return;
     }
+    this.currentSelection = selInfo;
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0)
       return;
@@ -182,24 +220,28 @@ var AppleHighlightPlugin = class extends import_obsidian.Plugin {
     return `<mark class="${colorClass}">${inner}</mark>`;
   }
   applyHighlight(editor, color) {
-    const selectedText = editor.getSelection();
-    if (!selectedText)
+    var _a;
+    const selInfo = (_a = this.currentSelection) != null ? _a : getSelection(editor);
+    if (!selInfo)
       return;
-    const cleanText = selectedText.replace(
+    const cleanText = selInfo.text.replace(
       /<mark class="hl-\w+">([\s\S]*?)<\/mark>/g,
       "$1"
     );
     const highlighted = this.wrapWithMark(cleanText, color.class);
-    editor.replaceSelection(highlighted);
+    replaceRange(editor, highlighted, selInfo.from, selInfo.to);
+    this.currentSelection = null;
   }
   removeHighlight(editor) {
-    const selectedText = editor.getSelection();
-    if (!selectedText)
+    var _a;
+    const selInfo = (_a = this.currentSelection) != null ? _a : getSelection(editor);
+    if (!selInfo)
       return;
-    const cleaned = selectedText.replace(
+    const cleaned = selInfo.text.replace(
       /<mark class="hl-\w+">([\s\S]*?)<\/mark>/g,
       "$1"
     );
-    editor.replaceSelection(cleaned);
+    replaceRange(editor, cleaned, selInfo.from, selInfo.to);
+    this.currentSelection = null;
   }
 };

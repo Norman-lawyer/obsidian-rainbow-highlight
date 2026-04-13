@@ -1,4 +1,5 @@
-import { Editor, MarkdownView, Plugin } from "obsidian";
+import { Editor, EditorPosition, MarkdownView, Plugin } from "obsidian";
+import { EditorView } from "@codemirror/view";
 
 interface HighlightColor {
   name: string;
@@ -16,37 +17,78 @@ const HIGHLIGHT_COLORS: HighlightColor[] = [
   { name: "Orange",  class: "hl-orange",  color: "#9a3412", bg: "#fb923c" },
 ];
 
-export default class AppleHighlightPlugin extends Plugin {
+interface SelectionInfo {
+  text: string;
+  from: number;
+  to: number;
+}
+
+function getCmView(editor: Editor): EditorView | null {
+  return (editor as any).cm ?? null;
+}
+
+function getSelection(editor: Editor): SelectionInfo | null {
+  // Try standard API first
+  const text = editor.getSelection();
+  if (text && text.trim().length > 0) {
+    const cmView = getCmView(editor);
+    if (cmView) {
+      const sel = cmView.state.selection.main;
+      return { text, from: sel.from, to: sel.to };
+    }
+    // Fallback: compute positions from Obsidian editor API
+    const from = editor.getCursor("from");
+    const to = editor.getCursor("to");
+    return { text, from: editor.posToOffset(from), to: editor.posToOffset(to) };
+  }
+
+  // Fallback: read directly from CM6 state (works inside callouts, embeds, etc.)
+  const cmView = getCmView(editor);
+  if (!cmView) return null;
+  const sel = cmView.state.selection.main;
+  if (sel.from === sel.to) return null;
+  const cmText = cmView.state.sliceDoc(sel.from, sel.to);
+  if (!cmText || cmText.trim().length === 0) return null;
+  return { text: cmText, from: sel.from, to: sel.to };
+}
+
+function replaceRange(editor: Editor, replacement: string, from: number, to: number) {
+  const cmView = getCmView(editor);
+  if (cmView) {
+    cmView.dispatch({
+      changes: { from, to, insert: replacement },
+    });
+  } else {
+    // Fallback to Obsidian API
+    editor.replaceSelection(replacement);
+  }
+}
+
+export default class RainbowHighlightPlugin extends Plugin {
   private popover: HTMLElement | null = null;
-  private selectionHandler: (() => void) | null = null;
+  private currentSelection: SelectionInfo | null = null;
 
   onload() {
-    // Register the mouseup handler on the workspace
     this.registerDomEvent(document, "mouseup", (evt: MouseEvent) => {
-      // Small delay to let the selection finalize
       setTimeout(() => this.handleSelection(evt), 10);
     });
 
-    // Register keyboard selection (shift+arrow keys)
     this.registerDomEvent(document, "keyup", (evt: KeyboardEvent) => {
       if (evt.shiftKey) {
         setTimeout(() => this.handleSelection(evt), 10);
       }
     });
 
-    // Close popover on click outside
     this.registerDomEvent(document, "mousedown", (evt: MouseEvent) => {
       if (this.popover && !this.popover.contains(evt.target as Node)) {
         this.removePopover();
       }
     });
 
-    // Close popover on scroll
     this.registerDomEvent(document, "scroll", () => {
       this.removePopover();
     }, true);
 
-    // Add command for each color
     HIGHLIGHT_COLORS.forEach((color) => {
       this.addCommand({
         id: `highlight-${color.class}`,
@@ -57,7 +99,6 @@ export default class AppleHighlightPlugin extends Plugin {
       });
     });
 
-    // Add remove highlight command
     this.addCommand({
       id: "remove-highlight",
       name: "Remove highlight",
@@ -76,14 +117,15 @@ export default class AppleHighlightPlugin extends Plugin {
     if (!activeView) return;
 
     const editor = activeView.editor;
-    const selectedText = editor.getSelection();
+    const selInfo = getSelection(editor);
 
-    if (!selectedText || selectedText.trim().length === 0) {
+    if (!selInfo) {
       this.removePopover();
       return;
     }
 
-    // Get cursor position for popover placement
+    this.currentSelection = selInfo;
+
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
 
@@ -99,7 +141,6 @@ export default class AppleHighlightPlugin extends Plugin {
     const popover = document.createElement("div");
     popover.addClass("hl-popover");
 
-    // Color circles
     const colorsContainer = document.createElement("div");
     colorsContainer.addClass("hl-popover-colors");
 
@@ -120,7 +161,6 @@ export default class AppleHighlightPlugin extends Plugin {
       colorsContainer.appendChild(circle);
     });
 
-    // Remove highlight button
     const removeBtn = document.createElement("button");
     removeBtn.addClass("hl-color-circle", "hl-remove-circle");
     removeBtn.setAttribute("aria-label", "Remove highlight");
@@ -153,17 +193,14 @@ export default class AppleHighlightPlugin extends Plugin {
     popover.appendChild(colorsContainer);
     document.body.appendChild(popover);
 
-    // Position the popover above the selection
     const popoverRect = popover.getBoundingClientRect();
     let top = rect.top - popoverRect.height - 8;
     let left = rect.left + rect.width / 2 - popoverRect.width / 2;
 
-    // If not enough space above, show below
     if (top < 0) {
       top = rect.bottom + 8;
     }
 
-    // Keep within viewport horizontally
     if (left < 8) left = 8;
     if (left + popoverRect.width > window.innerWidth - 8) {
       left = window.innerWidth - popoverRect.width - 8;
@@ -183,8 +220,6 @@ export default class AppleHighlightPlugin extends Plugin {
   }
 
   private mdToHtml(text: string): string {
-    // Convert markdown formatting to HTML equivalents
-    // Order matters: bold-italic first, then bold, then italic
     let result = text;
     result = result.replace(/\*\*\*([\s\S]*?)\*\*\*/g, "<b><i>$1</i></b>");
     result = result.replace(/\*\*([\s\S]*?)\*\*/g, "<b>$1</b>");
@@ -200,27 +235,28 @@ export default class AppleHighlightPlugin extends Plugin {
   }
 
   private applyHighlight(editor: Editor, color: HighlightColor) {
-    const selectedText = editor.getSelection();
-    if (!selectedText) return;
+    const selInfo = this.currentSelection ?? getSelection(editor);
+    if (!selInfo) return;
 
-    // Strip existing highlight mark tags if re-highlighting
-    const cleanText = selectedText.replace(
+    const cleanText = selInfo.text.replace(
       /<mark class="hl-\w+">([\s\S]*?)<\/mark>/g,
       "$1"
     );
 
     const highlighted = this.wrapWithMark(cleanText, color.class);
-    editor.replaceSelection(highlighted);
+    replaceRange(editor, highlighted, selInfo.from, selInfo.to);
+    this.currentSelection = null;
   }
 
   private removeHighlight(editor: Editor) {
-    const selectedText = editor.getSelection();
-    if (!selectedText) return;
+    const selInfo = this.currentSelection ?? getSelection(editor);
+    if (!selInfo) return;
 
-    const cleaned = selectedText.replace(
+    const cleaned = selInfo.text.replace(
       /<mark class="hl-\w+">([\s\S]*?)<\/mark>/g,
       "$1"
     );
-    editor.replaceSelection(cleaned);
+    replaceRange(editor, cleaned, selInfo.from, selInfo.to);
+    this.currentSelection = null;
   }
 }
