@@ -1,11 +1,23 @@
 import { Editor, MarkdownView, Plugin } from "obsidian";
-import { EditorView } from "@codemirror/view";
 
 interface HighlightColor {
   name: string;
   class: string;
   color: string;
   bg: string;
+}
+
+interface CmEditorView {
+  state: {
+    selection: { main: { from: number; to: number } };
+    doc: { toString(): string };
+    sliceDoc(from: number, to: number): string;
+  };
+  dispatch(tr: { changes: { from: number; to: number; insert: string } }): void;
+}
+
+interface EditorWithCm extends Editor {
+  cm?: CmEditorView;
 }
 
 const HIGHLIGHT_COLORS: HighlightColor[] = [
@@ -23,8 +35,8 @@ interface SelectionInfo {
   to: number;
 }
 
-function getCmView(editor: Editor): EditorView | null {
-  return (editor as any).cm ?? null;
+function getCmView(editor: Editor): CmEditorView | null {
+  return (editor as EditorWithCm).cm ?? null;
 }
 
 function getSelection(editor: Editor): SelectionInfo | null {
