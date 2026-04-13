@@ -75,7 +75,7 @@ mark.hl-orange  { background-color: #ffedd5 !important; color: #9a3412 !importan
 
 .hl-color-circle:hover {
   transform: scale(1.2);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
 }
 
 .hl-color-circle:active {

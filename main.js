@@ -238,6 +238,17 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     return result;
   }
   wrapWithMark(text, colorClass) {
+    if (text.includes("\n> ")) {
+      return text.split("\n").map((line) => {
+        const match = line.match(/^(>\s*)(.*)/);
+        if (match) {
+          const prefix = match[1];
+          const content = this.mdToHtml(match[2]);
+          return `${prefix}<mark class="${colorClass}">${content}</mark>`;
+        }
+        return `<mark class="${colorClass}">${this.mdToHtml(line)}</mark>`;
+      }).join("\n");
+    }
     const inner = this.mdToHtml(text);
     return `<mark class="${colorClass}">${inner}</mark>`;
   }

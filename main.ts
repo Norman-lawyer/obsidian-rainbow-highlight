@@ -1,4 +1,4 @@
-import { Editor, EditorPosition, MarkdownView, Plugin } from "obsidian";
+import { Editor, MarkdownView, Plugin } from "obsidian";
 import { EditorView } from "@codemirror/view";
 
 interface HighlightColor {
@@ -261,6 +261,18 @@ export default class RainbowHighlightPlugin extends Plugin {
   }
 
   private wrapWithMark(text: string, colorClass: string): string {
+    // If text contains callout prefixes ("> "), wrap each line's content separately
+    if (text.includes("\n> ")) {
+      return text.split("\n").map(line => {
+        const match = line.match(/^(>\s*)(.*)/);
+        if (match) {
+          const prefix = match[1];
+          const content = this.mdToHtml(match[2]);
+          return `${prefix}<mark class="${colorClass}">${content}</mark>`;
+        }
+        return `<mark class="${colorClass}">${this.mdToHtml(line)}</mark>`;
+      }).join("\n");
+    }
     const inner = this.mdToHtml(text);
     return `<mark class="${colorClass}">${inner}</mark>`;
   }
