@@ -1,0 +1,121 @@
+/* ===== Highlight Colors ===== */
+
+.hl-yellow  { background-color: #fef3c7; color: #946800; border-radius: 3px; padding: 1px 2px; }
+.hl-green   { background-color: #d1fae5; color: #1a6b3c; border-radius: 3px; padding: 1px 2px; }
+.hl-blue    { background-color: #dbeafe; color: #1e5a8a; border-radius: 3px; padding: 1px 2px; }
+.hl-pink    { background-color: #fce7f3; color: #9d174d; border-radius: 3px; padding: 1px 2px; }
+.hl-purple  { background-color: #ede9fe; color: #5b21b6; border-radius: 3px; padding: 1px 2px; }
+.hl-orange  { background-color: #ffedd5; color: #9a3412; border-radius: 3px; padding: 1px 2px; }
+
+/* Dark theme adjustments */
+.theme-dark .hl-yellow  { background-color: #78560d; color: #fef3c7; }
+.theme-dark .hl-green   { background-color: #14532d; color: #d1fae5; }
+.theme-dark .hl-blue    { background-color: #1e3a5f; color: #dbeafe; }
+.theme-dark .hl-pink    { background-color: #831843; color: #fce7f3; }
+.theme-dark .hl-purple  { background-color: #3b0764; color: #ede9fe; }
+.theme-dark .hl-orange  { background-color: #7c2d12; color: #ffedd5; }
+
+/* ===== Popover ===== */
+
+.hl-popover {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  animation: hl-fade-in 0.15s ease-out;
+}
+
+@keyframes hl-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hl-popover-colors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 24px;
+  padding: 6px 10px;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.12),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.theme-dark .hl-popover-colors {
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* Color circle buttons */
+
+.hl-color-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50% !important;
+  border: none !important;
+  background: var(--circle-bg) !important;
+  background-color: var(--circle-bg) !important;
+  cursor: pointer;
+  padding: 0 !important;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none !important;
+}
+
+.hl-color-circle:hover {
+  transform: scale(1.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.hl-color-circle:active {
+  transform: scale(0.95);
+}
+
+/* Remove highlight button */
+
+.hl-remove-circle {
+  --circle-bg: var(--background-secondary);
+  --circle-border: var(--text-muted);
+  color: var(--text-muted);
+  margin-left: 2px;
+  position: relative;
+}
+
+.hl-remove-circle::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  background: var(--background-modifier-border);
+}
+
+.hl-remove-circle:hover {
+  color: var(--text-normal);
+}
+
+/* ===== Reading mode (preview) highlight rendering ===== */
+
+.markdown-preview-view mark[class^="hl-"] {
+  border-radius: 3px;
+  padding: 1px 2px;
+}
+
+/* ===== Source/Live preview: show colors in editor ===== */
+
+.cm-s-obsidian .HyperMD-mark-highlight mark[class^="hl-"] {
+  border-radius: 3px;
+  padding: 1px 2px;
+}
