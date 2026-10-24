@@ -1,4 +1,12 @@
-import { Editor, MarkdownView, Plugin } from "obsidian";
+import { Editor, MarkdownView, Plugin, setIcon } from "obsidian";
+import {
+  applyColorToText,
+  expandToPluginMark,
+  findClosestSelection,
+  HighlightKind,
+  removeHighlightsFromText,
+  SelectionInfo,
+} from "./highlight-utils";
 
 interface HighlightColor {
   name: string;
@@ -14,6 +22,7 @@ interface CmEditorView {
     sliceDoc(from: number, to: number): string;
   };
   dispatch(tr: { changes: { from: number; to: number; insert: string } }): void;
+  posAtDOM?(node: Node, offset?: number): number;
 }
 
 interface EditorWithCm extends Editor {
@@ -21,88 +30,71 @@ interface EditorWithCm extends Editor {
 }
 
 const HIGHLIGHT_COLORS: HighlightColor[] = [
-  { name: "Yellow",  class: "hl-yellow",  color: "#946800", bg: "#facc15" },
-  { name: "Green",   class: "hl-green",   color: "#1a6b3c", bg: "#4ade80" },
-  { name: "Blue",    class: "hl-blue",    color: "#1e5a8a", bg: "#60a5fa" },
-  { name: "Pink",    class: "hl-pink",    color: "#9d174d", bg: "#f472b6" },
-  { name: "Purple",  class: "hl-purple",  color: "#5b21b6", bg: "#a78bfa" },
-  { name: "Orange",  class: "hl-orange",  color: "#9a3412", bg: "#fb923c" },
+  { name: "Red", class: "hl-red", color: "#991b1b", bg: "#ef4444" },
+  { name: "Orange", class: "hl-orange", color: "#9a3412", bg: "#fb923c" },
+  { name: "Yellow", class: "hl-yellow", color: "#946800", bg: "#facc15" },
+  { name: "Green", class: "hl-green", color: "#166534", bg: "#4ade80" },
+  { name: "Cyan", class: "hl-cyan", color: "#155e75", bg: "#22d3ee" },
+  { name: "Blue", class: "hl-blue", color: "#1e40af", bg: "#60a5fa" },
+  { name: "Purple", class: "hl-purple", color: "#5b21b6", bg: "#a78bfa" },
 ];
-
-interface SelectionInfo {
-  text: string;
-  from: number;
-  to: number;
-}
 
 function getCmView(editor: Editor): CmEditorView | null {
   return (editor as EditorWithCm).cm ?? null;
 }
 
 function getSelection(editor: Editor): SelectionInfo | null {
-  // Try standard API first
   const text = editor.getSelection();
   if (text && text.trim().length > 0) {
     const cmView = getCmView(editor);
     if (cmView) {
-      const sel = cmView.state.selection.main;
-      return { text, from: sel.from, to: sel.to };
+      const selection = cmView.state.selection.main;
+      return { text, from: selection.from, to: selection.to };
     }
     const from = editor.getCursor("from");
     const to = editor.getCursor("to");
     return { text, from: editor.posToOffset(from), to: editor.posToOffset(to) };
   }
 
-  // Fallback: read directly from CM6 state
   const cmView = getCmView(editor);
   if (!cmView) return null;
-  const sel = cmView.state.selection.main;
-  if (sel.from !== sel.to) {
-    const cmText = cmView.state.sliceDoc(sel.from, sel.to);
+  const selection = cmView.state.selection.main;
+  if (selection.from !== selection.to) {
+    const cmText = cmView.state.sliceDoc(selection.from, selection.to);
     if (cmText && cmText.trim().length > 0) {
-      return { text: cmText, from: sel.from, to: sel.to };
+      return { text: cmText, from: selection.from, to: selection.to };
     }
   }
 
-  // Last resort: search the entire document for the DOM-selected text.
-  // This handles callouts, embeds, and other rendered widgets where
-  // posAtDOM fails or returns incorrect ranges.
-  const domSel = window.getSelection();
-  if (!domSel || domSel.rangeCount === 0 || domSel.isCollapsed) return null;
-  const domText = domSel.toString();
+  // Rendered widgets such as callouts expose a DOM selection but not always a
+  // CodeMirror selection. Use the nearest source occurrence, not the first one.
+  const domSelection = window.getSelection();
+  if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
+    return null;
+  }
+  const domText = domSelection.toString();
   if (!domText || !domText.trim()) return null;
 
-  const docStr = cmView.state.doc.toString();
-
-  // Try exact match in document
-  let idx = docStr.indexOf(domText);
-  if (idx >= 0) {
-    return { text: domText, from: idx, to: idx + domText.length };
-  }
-
-  // Handle multiline callout: DOM text has no "> " prefixes but source does
-  const domLines = domText.split("\n");
-  if (domLines.length > 1) {
-    for (const prefix of ["> ", ">", ">  "]) {
-      const withPrefixes = domLines[0] + "\n" + domLines.slice(1).map(l => prefix + l).join("\n");
-      idx = docStr.indexOf(withPrefixes);
-      if (idx >= 0) {
-        return { text: withPrefixes, from: idx, to: idx + withPrefixes.length };
-      }
+  let hintFrom = selection.from;
+  let hintTo = selection.to;
+  const range = domSelection.getRangeAt(0);
+  if (cmView.posAtDOM) {
+    try {
+      hintFrom = cmView.posAtDOM(range.startContainer, range.startOffset);
+      hintTo = cmView.posAtDOM(range.endContainer, range.endOffset);
+    } catch {
+      // Some rendered widgets cannot map their DOM nodes back to CodeMirror.
     }
   }
 
-  return null;
+  return findClosestSelection(cmView.state.doc.toString(), domText, hintFrom, hintTo);
 }
 
 function replaceRange(editor: Editor, replacement: string, from: number, to: number) {
   const cmView = getCmView(editor);
   if (cmView) {
-    cmView.dispatch({
-      changes: { from, to, insert: replacement },
-    });
+    cmView.dispatch({ changes: { from, to, insert: replacement } });
   } else {
-    // Fallback to Obsidian API
     editor.replaceSelection(replacement);
   }
 }
@@ -110,208 +102,201 @@ function replaceRange(editor: Editor, replacement: string, from: number, to: num
 export default class RainbowHighlightPlugin extends Plugin {
   private popover: HTMLElement | null = null;
   private currentSelection: SelectionInfo | null = null;
+  private selectionTimer: number | null = null;
+  private ignoreSelectionUntil = 0;
 
   onload() {
-    this.registerDomEvent(document, "mouseup", (evt: MouseEvent) => {
-      setTimeout(() => this.handleSelection(evt), 10);
+    this.registerDomEvent(document, "pointerup", () => this.queueSelection(30));
+
+    this.registerDomEvent(document, "keyup", (event: KeyboardEvent) => {
+      if (event.shiftKey) this.queueSelection(10);
     });
 
-    this.registerDomEvent(document, "keyup", (evt: KeyboardEvent) => {
-      if (evt.shiftKey) {
-        setTimeout(() => this.handleSelection(evt), 10);
+    this.registerDomEvent(document, "mousedown", (event: MouseEvent) => {
+      if (this.popover && !this.popover.contains(event.target as Node)) {
+        this.removePopover(true);
       }
     });
 
-    this.registerDomEvent(document, "mousedown", (evt: MouseEvent) => {
-      if (this.popover && !this.popover.contains(evt.target as Node)) {
-        this.removePopover();
-      }
-    });
-
-    this.registerDomEvent(document, "scroll", () => {
-      this.removePopover();
-    }, true);
+    this.registerDomEvent(document, "scroll", () => this.removePopover(true), true);
+    this.registerDomEvent(window, "resize", () => this.removePopover(true));
 
     HIGHLIGHT_COLORS.forEach((color) => {
       this.addCommand({
         id: `highlight-${color.class}`,
-        name: `Highlight: ${color.name.toLowerCase()}`,
-        editorCallback: (editor: Editor) => {
-          this.applyHighlight(editor, color);
-        },
+        name: `Highlight background: ${color.name.toLowerCase()}`,
+        editorCallback: (editor: Editor) => this.applyColor(editor, color, "bg"),
+      });
+      this.addCommand({
+        id: `text-${color.class}`,
+        name: `Text color: ${color.name.toLowerCase()}`,
+        editorCallback: (editor: Editor) => this.applyColor(editor, color, "text"),
       });
     });
 
     this.addCommand({
       id: "remove-highlight",
       name: "Remove highlight",
-      editorCallback: (editor: Editor) => {
-        this.removeHighlight(editor);
-      },
+      editorCallback: (editor: Editor) => this.removeHighlight(editor),
     });
   }
 
   onunload() {
-    this.removePopover();
+    if (this.selectionTimer !== null) window.clearTimeout(this.selectionTimer);
+    this.removePopover(true);
   }
 
-  private handleSelection(evt: MouseEvent | KeyboardEvent) {
+  private queueSelection(delay: number) {
+    if (this.selectionTimer !== null) window.clearTimeout(this.selectionTimer);
+    this.selectionTimer = window.setTimeout(() => {
+      this.selectionTimer = null;
+      this.handleSelection();
+    }, delay);
+  }
+
+  private handleSelection() {
+    if (Date.now() < this.ignoreSelectionUntil) return;
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!activeView) return;
-
-    const editor = activeView.editor;
-    const selInfo = getSelection(editor);
-
-    if (!selInfo) {
-      this.removePopover();
+    if (!activeView) {
+      this.removePopover(true);
       return;
     }
 
-    this.currentSelection = selInfo;
+    const domSelection = window.getSelection();
+    const anchor = domSelection?.anchorNode;
+    if (!anchor || !activeView.containerEl.contains(anchor)) {
+      this.removePopover(true);
+      return;
+    }
 
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
+    const editor = activeView.editor;
+    const selectionInfo = getSelection(editor);
+    if (!selectionInfo || !domSelection || domSelection.rangeCount === 0) {
+      this.removePopover(true);
+      return;
+    }
 
-    const range = sel.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-
+    this.currentSelection = selectionInfo;
+    const rect = domSelection.getRangeAt(0).getBoundingClientRect();
     this.showPopover(rect, editor);
   }
 
   private showPopover(rect: DOMRect, editor: Editor) {
-    this.removePopover();
+    this.removePopover(false);
 
     const popover = document.createElement("div");
     popover.addClass("hl-popover");
+    const container = document.createElement("div");
+    container.addClass("hl-popover-colors");
 
-    const colorsContainer = document.createElement("div");
-    colorsContainer.addClass("hl-popover-colors");
-
-    HIGHLIGHT_COLORS.forEach((color) => {
-      const circle = document.createElement("button");
-      circle.addClass("hl-color-circle");
-      circle.setAttribute("aria-label", color.name);
-      circle.style.setProperty("--circle-bg", color.bg);
-      circle.style.setProperty("--circle-border", color.color);
-
-      circle.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.applyHighlight(editor, color);
-        this.removePopover();
-      });
-
-      colorsContainer.appendChild(circle);
-    });
-
-    const removeBtn = document.createElement("button");
-    removeBtn.addClass("hl-color-circle", "hl-remove-circle");
-    removeBtn.setAttribute("aria-label", "Remove highlight");
-    const svgNS = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(svgNS, "svg");
-    svg.setAttribute("viewBox", "0 0 16 16");
-    svg.setAttribute("width", "10");
-    svg.setAttribute("height", "10");
-    const line1 = document.createElementNS(svgNS, "line");
-    line1.setAttribute("x1", "3"); line1.setAttribute("y1", "3");
-    line1.setAttribute("x2", "13"); line1.setAttribute("y2", "13");
-    line1.setAttribute("stroke", "currentColor"); line1.setAttribute("stroke-width", "2");
-    line1.setAttribute("stroke-linecap", "round");
-    const line2 = document.createElementNS(svgNS, "line");
-    line2.setAttribute("x1", "13"); line2.setAttribute("y1", "3");
-    line2.setAttribute("x2", "3"); line2.setAttribute("y2", "13");
-    line2.setAttribute("stroke", "currentColor"); line2.setAttribute("stroke-width", "2");
-    line2.setAttribute("stroke-linecap", "round");
-    svg.appendChild(line1);
-    svg.appendChild(line2);
-    removeBtn.appendChild(svg);
-    removeBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.removeHighlight(editor);
-      this.removePopover();
-    });
-    colorsContainer.appendChild(removeBtn);
-
-    popover.appendChild(colorsContainer);
+    const backgroundRow = this.buildRow(editor, "bg", "Background");
+    backgroundRow.appendChild(this.buildRemoveButton(editor));
+    container.appendChild(backgroundRow);
+    container.appendChild(this.buildRow(editor, "text", "Text"));
+    popover.appendChild(container);
     document.body.appendChild(popover);
 
     const popoverRect = popover.getBoundingClientRect();
     let top = rect.top - popoverRect.height - 8;
     let left = rect.left + rect.width / 2 - popoverRect.width / 2;
-
-    if (top < 0) {
-      top = rect.bottom + 8;
-    }
-
-    if (left < 8) left = 8;
-    if (left + popoverRect.width > window.innerWidth - 8) {
-      left = window.innerWidth - popoverRect.width - 8;
-    }
+    if (top < 8) top = rect.bottom + 8;
+    left = Math.max(8, Math.min(left, window.innerWidth - popoverRect.width - 8));
 
     popover.style.top = `${top}px`;
     popover.style.left = `${left}px`;
-
     this.popover = popover;
   }
 
-  private removePopover() {
-    if (this.popover) {
-      this.popover.remove();
-      this.popover = null;
+  private buildRow(
+    editor: Editor,
+    kind: HighlightKind,
+    labelText: string
+  ): HTMLElement {
+    const row = document.createElement("div");
+    row.addClass("hl-popover-row");
+    const label = document.createElement("div");
+    label.addClass("hl-row-icon");
+    label.setAttribute("aria-label", labelText);
+    label.setAttribute("title", labelText);
+    setIcon(label, kind === "bg" ? "highlighter" : "type");
+    row.appendChild(label);
+
+    HIGHLIGHT_COLORS.forEach((color) => {
+      const circle = document.createElement("button");
+      circle.addClass("hl-color-circle");
+      const tooltip = `${labelText}: ${color.name.toLowerCase()}`;
+      circle.setAttribute("aria-label", tooltip);
+      circle.setAttribute("title", tooltip);
+      if (kind === "bg") {
+        circle.style.setProperty("--circle-bg", color.bg);
+        circle.style.setProperty("--circle-border", color.color);
+      } else {
+        circle.addClass("hl-text-circle");
+        circle.style.setProperty("--circle-text", color.bg);
+        circle.setText("A");
+      }
+
+      circle.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.ignoreSelectionUntil = Date.now() + 250;
+        this.applyColor(editor, color, kind);
+        this.removePopover(true);
+      });
+      row.appendChild(circle);
+    });
+
+    return row;
+  }
+
+  private buildRemoveButton(editor: Editor): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.addClass("hl-color-circle", "hl-remove-circle");
+    button.setAttribute("aria-label", "Remove highlight");
+    button.setAttribute("title", "Remove highlight");
+    setIcon(button, "x");
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.ignoreSelectionUntil = Date.now() + 250;
+      this.removeHighlight(editor);
+      this.removePopover(true);
+    });
+    return button;
+  }
+
+  private removePopover(clearSelection: boolean) {
+    this.popover?.remove();
+    this.popover = null;
+    if (clearSelection) this.currentSelection = null;
+  }
+
+  private applyColor(editor: Editor, color: HighlightColor, kind: HighlightKind) {
+    let selectionInfo = this.currentSelection ?? getSelection(editor);
+    if (!selectionInfo) return;
+
+    const cmView = getCmView(editor);
+    if (cmView) {
+      selectionInfo = expandToPluginMark(cmView.state.doc.toString(), selectionInfo);
     }
-  }
-
-  private mdToHtml(text: string): string {
-    let result = text;
-    result = result.replace(/\*\*\*([\s\S]*?)\*\*\*/g, "<b><i>$1</i></b>");
-    result = result.replace(/\*\*([\s\S]*?)\*\*/g, "<b>$1</b>");
-    result = result.replace(/\*([\s\S]*?)\*/g, "<i>$1</i>");
-    result = result.replace(/~~([\s\S]*?)~~/g, "<s>$1</s>");
-    result = result.replace(/==([\s\S]*?)==/g, "$1");
-    return result;
-  }
-
-  private wrapWithMark(text: string, colorClass: string): string {
-    // If text contains callout prefixes ("> "), wrap each line's content separately
-    if (text.includes("\n> ")) {
-      return text.split("\n").map(line => {
-        const match = line.match(/^(>\s*)(.*)/);
-        if (match) {
-          const prefix = match[1];
-          const content = this.mdToHtml(match[2]);
-          return `${prefix}<mark class="${colorClass}">${content}</mark>`;
-        }
-        return `<mark class="${colorClass}">${this.mdToHtml(line)}</mark>`;
-      }).join("\n");
-    }
-    const inner = this.mdToHtml(text);
-    return `<mark class="${colorClass}">${inner}</mark>`;
-  }
-
-  private applyHighlight(editor: Editor, color: HighlightColor) {
-    const selInfo = this.currentSelection ?? getSelection(editor);
-    if (!selInfo) return;
-
-    const cleanText = selInfo.text.replace(
-      /<mark class="hl-\w+">([\s\S]*?)<\/mark>/g,
-      "$1"
-    );
-
-    const highlighted = this.wrapWithMark(cleanText, color.class);
-    replaceRange(editor, highlighted, selInfo.from, selInfo.to);
+    const newClass = kind === "bg"
+      ? color.class
+      : color.class.replace(/^hl-/, "hlt-");
+    const highlighted = applyColorToText(selectionInfo.text, newClass, kind);
+    replaceRange(editor, highlighted, selectionInfo.from, selectionInfo.to);
     this.currentSelection = null;
   }
 
   private removeHighlight(editor: Editor) {
-    const selInfo = this.currentSelection ?? getSelection(editor);
-    if (!selInfo) return;
+    let selectionInfo = this.currentSelection ?? getSelection(editor);
+    if (!selectionInfo) return;
 
-    const cleaned = selInfo.text.replace(
-      /<mark class="hl-\w+">([\s\S]*?)<\/mark>/g,
-      "$1"
-    );
-    replaceRange(editor, cleaned, selInfo.from, selInfo.to);
+    const cmView = getCmView(editor);
+    if (cmView) {
+      selectionInfo = expandToPluginMark(cmView.state.doc.toString(), selectionInfo);
+    }
+    const cleaned = removeHighlightsFromText(selectionInfo.text);
+    replaceRange(editor, cleaned, selectionInfo.from, selectionInfo.to);
     this.currentSelection = null;
   }
 }

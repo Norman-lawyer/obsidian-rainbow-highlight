@@ -1,49 +1,73 @@
-/* ===== Highlight Colors ===== */
+/* Highlight backgrounds */
 
-mark.hl-yellow  { background-color: #fef3c7 !important; color: #946800 !important; border-radius: 3px; padding: 1px 2px; }
-mark.hl-green   { background-color: #d1fae5 !important; color: #1a6b3c !important; border-radius: 3px; padding: 1px 2px; }
-mark.hl-blue    { background-color: #dbeafe !important; color: #1e5a8a !important; border-radius: 3px; padding: 1px 2px; }
-mark.hl-pink    { background-color: #fce7f3 !important; color: #9d174d !important; border-radius: 3px; padding: 1px 2px; }
-mark.hl-purple  { background-color: #ede9fe !important; color: #5b21b6 !important; border-radius: 3px; padding: 1px 2px; }
-mark.hl-orange  { background-color: #ffedd5 !important; color: #9a3412 !important; border-radius: 3px; padding: 1px 2px; }
+mark[class*="hl-"],
+mark[class*="hlt-"] {
+  background-color: transparent;
+  border-radius: 3px;
+  padding: 1px 2px;
+}
 
-/* Dark theme adjustments */
+mark.hl-red     { background-color: #fee2e2 !important; color: #991b1b !important; }
+mark.hl-orange  { background-color: #ffedd5 !important; color: #9a3412 !important; }
+mark.hl-yellow  { background-color: #fef3c7 !important; color: #946800 !important; }
+mark.hl-green   { background-color: #d1fae5 !important; color: #166534 !important; }
+mark.hl-cyan    { background-color: #cffafe !important; color: #155e75 !important; }
+mark.hl-blue    { background-color: #dbeafe !important; color: #1e40af !important; }
+mark.hl-purple  { background-color: #ede9fe !important; color: #5b21b6 !important; }
+mark.hl-pink    { background-color: #fce7f3 !important; color: #9d174d !important; }
+
+.theme-dark mark.hl-red     { background-color: #7f1d1d !important; color: #fee2e2 !important; }
+.theme-dark mark.hl-orange  { background-color: #7c2d12 !important; color: #ffedd5 !important; }
 .theme-dark mark.hl-yellow  { background-color: #78560d !important; color: #fef3c7 !important; }
 .theme-dark mark.hl-green   { background-color: #14532d !important; color: #d1fae5 !important; }
-.theme-dark mark.hl-blue    { background-color: #1e3a5f !important; color: #dbeafe !important; }
-.theme-dark mark.hl-pink    { background-color: #831843 !important; color: #fce7f3 !important; }
+.theme-dark mark.hl-cyan    { background-color: #164e63 !important; color: #cffafe !important; }
+.theme-dark mark.hl-blue    { background-color: #1e3a8a !important; color: #dbeafe !important; }
 .theme-dark mark.hl-purple  { background-color: #3b0764 !important; color: #ede9fe !important; }
-.theme-dark mark.hl-orange  { background-color: #7c2d12 !important; color: #ffedd5 !important; }
+.theme-dark mark.hl-pink    { background-color: #831843 !important; color: #fce7f3 !important; }
 
-/* ===== Popover ===== */
+/* Text colours can be combined with a background class. */
+
+mark.hlt-red    { color: #dc2626 !important; }
+mark.hlt-orange { color: #ea580c !important; }
+mark.hlt-yellow { color: #ca8a04 !important; }
+mark.hlt-green  { color: #16a34a !important; }
+mark.hlt-cyan   { color: #0891b2 !important; }
+mark.hlt-blue   { color: #2563eb !important; }
+mark.hlt-purple { color: #7c3aed !important; }
+mark.hlt-pink   { color: #db2777 !important; }
+
+.theme-dark mark.hlt-red    { color: #f87171 !important; }
+.theme-dark mark.hlt-orange { color: #fb923c !important; }
+.theme-dark mark.hlt-yellow { color: #facc15 !important; }
+.theme-dark mark.hlt-green  { color: #4ade80 !important; }
+.theme-dark mark.hlt-cyan   { color: #22d3ee !important; }
+.theme-dark mark.hlt-blue   { color: #60a5fa !important; }
+.theme-dark mark.hlt-purple { color: #a78bfa !important; }
+.theme-dark mark.hlt-pink   { color: #f472b6 !important; }
+
+/* Floating palette */
 
 .hl-popover {
   position: fixed;
-  z-index: 9999;
+  z-index: var(--layer-popover, 30);
   display: flex;
   align-items: center;
   animation: hl-fade-in 0.15s ease-out;
 }
 
 @keyframes hl-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .hl-popover-colors {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
+  padding: 8px 10px;
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 24px;
-  padding: 6px 10px;
+  border-radius: 14px;
   box-shadow:
     0 4px 16px rgba(0, 0, 0, 0.12),
     0 1px 4px rgba(0, 0, 0, 0.08);
@@ -55,26 +79,48 @@ mark.hl-orange  { background-color: #ffedd5 !important; color: #9a3412 !importan
     0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
-/* Color circle buttons */
+.hl-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hl-row-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--text-muted);
+}
+
+.hl-row-icon svg {
+  width: 16px;
+  height: 16px;
+}
 
 .hl-color-circle {
-  width: 24px;
-  height: 24px;
-  border-radius: 50% !important;
-  border: none !important;
-  background: var(--circle-bg) !important;
-  background-color: var(--circle-bg) !important;
-  cursor: pointer;
-  padding: 0 !important;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0 !important;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  background: var(--circle-bg) !important;
+  background-color: var(--circle-bg) !important;
+  border: none !important;
+  border-radius: 50% !important;
   box-shadow: none !important;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .hl-color-circle:hover {
-  transform: scale(1.2);
+  transform: scale(1.18);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
 }
 
@@ -82,23 +128,32 @@ mark.hl-orange  { background-color: #ffedd5 !important; color: #9a3412 !importan
   transform: scale(0.95);
 }
 
-/* Remove highlight button */
+.hl-color-circle:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.hl-text-circle {
+  color: var(--circle-text) !important;
+  background: var(--background-primary) !important;
+  background-color: var(--background-primary) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+}
 
 .hl-remove-circle {
   --circle-bg: var(--background-secondary);
-  --circle-border: var(--text-muted);
-  color: var(--text-muted);
-  margin-left: 2px;
   position: relative;
+  margin-left: 2px;
+  color: var(--text-muted);
 }
 
 .hl-remove-circle::before {
-  content: "";
   position: absolute;
-  left: -5px;
   top: 2px;
   bottom: 2px;
+  left: -5px;
   width: 1px;
+  content: "";
   background: var(--background-modifier-border);
 }
 
@@ -106,16 +161,21 @@ mark.hl-orange  { background-color: #ffedd5 !important; color: #9a3412 !importan
   color: var(--text-normal);
 }
 
-/* ===== Reading mode (preview) highlight rendering ===== */
+.hl-remove-circle svg {
+  width: 12px;
+  height: 12px;
+}
 
-.markdown-preview-view mark[class^="hl-"] {
+/* Reading mode and live preview */
+
+.markdown-preview-view mark[class^="hl-"],
+.markdown-preview-view mark[class^="hlt-"] {
   border-radius: 3px;
   padding: 1px 2px;
 }
 
-/* ===== Source/Live preview: show colors in editor ===== */
-
-.cm-s-obsidian .HyperMD-mark-highlight mark[class^="hl-"] {
+.cm-s-obsidian .HyperMD-mark-highlight mark[class^="hl-"],
+.cm-s-obsidian .HyperMD-mark-highlight mark[class^="hlt-"] {
   border-radius: 3px;
   padding: 1px 2px;
 }

@@ -1,7 +1,7 @@
 {
   "id": "rainbow-highlight",
   "name": "Rainbow Highlight",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minAppVersion": "0.15.0",
   "description": "Beautiful multi-color text highlighting with a quick color palette popup.",
   "author": "Norman-lawyer",
