@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Rainbow Highlight usage example</title>
+  <desc id="desc">A bilingual Obsidian-style note demonstrating background highlights, text colors, and the two-row color palette.</desc>
+  <defs>
+    <linearGradient id="page-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171a20"/>
+      <stop offset="1" stop-color="#0f1116"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f472b6"/>
+      <stop offset="0.5" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#60a5fa"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      .ui { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .muted { fill: #8b93a7; }
+      .body { fill: #d8dce7; font-size: 23px; }
+      .small { fill: #aeb5c6; font-size: 17px; }
+      .label { fill: #f3f5f9; font-size: 15px; font-weight: 650; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="800" fill="#090b10"/>
+  <rect x="24" y="24" width="1152" height="752" rx="28" fill="url(#page-bg)" stroke="#303541" stroke-width="2"/>
+
+  <g class="ui">
+    <!-- Window chrome -->
+    <rect x="24" y="24" width="1152" height="58" rx="28" fill="#20242d"/>
+    <rect x="24" y="60" width="1152" height="22" fill="#20242d"/>
+    <circle cx="61" cy="53" r="7" fill="#ff605c"/>
+    <circle cx="85" cy="53" r="7" fill="#ffbd44"/>
+    <circle cx="109" cy="53" r="7" fill="#00ca4e"/>
+    <text x="600" y="60" text-anchor="middle" fill="#aeb5c6" font-size="16">Rainbow Highlight · Obsidian</text>
+
+    <!-- Sidebar -->
+    <rect x="24" y="82" width="236" height="694" fill="#15181e"/>
+    <line x1="260" y1="82" x2="260" y2="776" stroke="#303541"/>
+    <text x="55" y="132" class="small" font-weight="700">NOTES / 笔记</text>
+    <rect x="43" y="158" width="194" height="42" rx="9" fill="#292e39"/>
+    <rect x="43" y="158" width="4" height="42" rx="2" fill="#a78bfa"/>
+    <text x="61" y="185" fill="#f3f5f9" font-size="17">📖 Reading notes</text>
+    <text x="61" y="232" class="small">💡 Ideas / 灵感</text>
+    <text x="61" y="273" class="small">📚 Knowledge / 知识</text>
+    <text x="61" y="314" class="small">🗂 Projects / 项目</text>
+
+    <!-- Document -->
+    <rect x="260" y="82" width="916" height="694" fill="#191c23"/>
+    <rect x="308" y="118" width="6" height="35" rx="3" fill="url(#accent)"/>
+    <text x="332" y="149" fill="#f7f8fb" font-size="34" font-weight="760">Turn reading into memory</text>
+    <text x="332" y="184" fill="#9ca4b6" font-size="19">用色彩建立信息层级，让重点一眼可见。</text>
+
+    <text x="332" y="245" class="body">Color helps the eye find structure before the mind starts reading.</text>
+
+    <!-- Highlight examples -->
+    <rect x="331" y="278" width="280" height="39" rx="7" fill="#78560d"/>
+    <text x="343" y="305" fill="#fef3c7" font-size="22">Key conclusion / 核心结论</text>
+    <text x="625" y="305" class="body">deserves a warm background.</text>
+
+    <rect x="331" y="330" width="238" height="39" rx="7" fill="#14532d"/>
+    <text x="343" y="357" fill="#d1fae5" font-size="22">Action item / 行动事项</text>
+    <text x="583" y="357" class="body">stays calm and easy to scan.</text>
+
+    <rect x="331" y="382" width="238" height="39" rx="7" fill="#1e3a8a"/>
+    <text x="343" y="409" fill="#dbeafe" font-size="22">Reference / 参考资料</text>
+    <text x="583" y="409" class="body">gets a cool, quiet emphasis.</text>
+
+    <!-- Floating palette -->
+    <g filter="url(#shadow)">
+      <rect x="444" y="442" width="464" height="126" rx="18" fill="#252a34" stroke="#414855" stroke-width="1.5"/>
+      <text x="469" y="481" fill="#aeb5c6" font-size="18">✎</text>
+      <circle cx="511" cy="475" r="13" fill="#ef4444"/>
+      <circle cx="552" cy="475" r="13" fill="#fb923c"/>
+      <circle cx="593" cy="475" r="13" fill="#facc15"/>
+      <circle cx="634" cy="475" r="13" fill="#4ade80"/>
+      <circle cx="675" cy="475" r="13" fill="#22d3ee"/>
+      <circle cx="716" cy="475" r="13" fill="#60a5fa"/>
+      <circle cx="757" cy="475" r="13" fill="#a78bfa"/>
+      <line x1="788" y1="461" x2="788" y2="489" stroke="#4c5361"/>
+      <text x="812" y="482" text-anchor="middle" fill="#aeb5c6" font-size="22">×</text>
+
+      <text x="467" y="535" fill="#aeb5c6" font-size="18" font-weight="700">T</text>
+      <g font-size="16" font-weight="800" text-anchor="middle">
+        <circle cx="511" cy="529" r="13" fill="#181b22" stroke="#414855"/><text x="511" y="535" fill="#f87171">A</text>
+        <circle cx="552" cy="529" r="13" fill="#181b22" stroke="#414855"/><text x="552" y="535" fill="#fb923c">A</text>
+        <circle cx="593" cy="529" r="13" fill="#181b22" stroke="#414855"/><text x="593" y="535" fill="#facc15">A</text>
+        <circle cx="634" cy="529" r="13" fill="#181b22" stroke="#414855"/><text x="634" y="535" fill="#4ade80">A</text>
+        <circle cx="675" cy="529" r="13" fill="#181b22" stroke="#414855"/><text x="675" y="535" fill="#22d3ee">A</text>
+        <circle cx="716" cy="529" r="13" fill="#181b22" stroke="#414855"/><text x="716" y="535" fill="#60a5fa">A</text>
+        <circle cx="757" cy="529" r="13" fill="#181b22" stroke="#414855"/><text x="757" y="535" fill="#a78bfa">A</text>
+      </g>
+    </g>
+
+    <!-- Selected text and usage steps -->
+    <rect x="488" y="591" width="374" height="39" rx="6" fill="#264f78"/>
+    <text x="332" y="618" class="body">Select text, then </text>
+    <text x="500" y="618" fill="#f3f7ff" font-size="22">choose a background or text color</text>
+    <text x="866" y="618" class="body">.</text>
+
+    <rect x="332" y="667" width="793" height="68" rx="14" fill="#212630" stroke="#343a47"/>
+    <circle cx="366" cy="701" r="17" fill="#a78bfa"/>
+    <text x="366" y="707" text-anchor="middle" fill="#17131f" font-size="16" font-weight="800">1</text>
+    <text x="397" y="695" class="label">Select text → Pick a color → Done</text>
+    <text x="397" y="720" class="small">选中文字 → 选择颜色 → 完成高亮</text>
+  </g>
+</svg>

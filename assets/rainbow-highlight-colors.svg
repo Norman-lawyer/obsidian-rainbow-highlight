@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">Rainbow Highlight color palette</title>
+  <desc id="desc">Seven background colors and seven text colors available in Rainbow Highlight.</desc>
+  <defs>
+    <style>
+      .ui { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .name { font-size: 18px; font-weight: 700; }
+      .hex { font-size: 14px; opacity: 0.72; }
+    </style>
+  </defs>
+  <rect width="1200" height="300" rx="22" fill="#f7f7f9"/>
+  <g class="ui">
+    <text x="42" y="48" fill="#252832" font-size="24" font-weight="760">7 background colors · 7 text colors · 49 combinations</text>
+    <text x="42" y="78" fill="#656b78" font-size="17">7 种背景色 · 7 种文字色 · 49 种自由组合</text>
+
+    <g transform="translate(42 106)">
+      <g transform="translate(0 0)"><rect width="146" height="72" rx="13" fill="#fee2e2"/><text x="16" y="31" class="name" fill="#991b1b">Red / 红</text><text x="16" y="54" class="hex" fill="#991b1b">#fee2e2</text></g>
+      <g transform="translate(158 0)"><rect width="146" height="72" rx="13" fill="#ffedd5"/><text x="16" y="31" class="name" fill="#9a3412">Orange / 橙</text><text x="16" y="54" class="hex" fill="#9a3412">#ffedd5</text></g>
+      <g transform="translate(316 0)"><rect width="146" height="72" rx="13" fill="#fef3c7"/><text x="16" y="31" class="name" fill="#946800">Yellow / 黄</text><text x="16" y="54" class="hex" fill="#946800">#fef3c7</text></g>
+      <g transform="translate(474 0)"><rect width="146" height="72" rx="13" fill="#d1fae5"/><text x="16" y="31" class="name" fill="#166534">Green / 绿</text><text x="16" y="54" class="hex" fill="#166534">#d1fae5</text></g>
+      <g transform="translate(632 0)"><rect width="146" height="72" rx="13" fill="#cffafe"/><text x="16" y="31" class="name" fill="#155e75">Cyan / 青</text><text x="16" y="54" class="hex" fill="#155e75">#cffafe</text></g>
+      <g transform="translate(790 0)"><rect width="146" height="72" rx="13" fill="#dbeafe"/><text x="16" y="31" class="name" fill="#1e40af">Blue / 蓝</text><text x="16" y="54" class="hex" fill="#1e40af">#dbeafe</text></g>
+      <g transform="translate(948 0)"><rect width="146" height="72" rx="13" fill="#ede9fe"/><text x="16" y="31" class="name" fill="#5b21b6">Purple / 紫</text><text x="16" y="54" class="hex" fill="#5b21b6">#ede9fe</text></g>
+    </g>
+
+    <g transform="translate(42 198)">
+      <text x="0" y="32" fill="#656b78" font-size="17" font-weight="650">Text colors / 文字颜色</text>
+      <g font-size="20" font-weight="800" text-anchor="middle">
+        <circle cx="248" cy="25" r="23" fill="#fff" stroke="#e1e3e8"/><text x="248" y="32" fill="#dc2626">A</text>
+        <circle cx="323" cy="25" r="23" fill="#fff" stroke="#e1e3e8"/><text x="323" y="32" fill="#ea580c">A</text>
+        <circle cx="398" cy="25" r="23" fill="#fff" stroke="#e1e3e8"/><text x="398" y="32" fill="#ca8a04">A</text>
+        <circle cx="473" cy="25" r="23" fill="#fff" stroke="#e1e3e8"/><text x="473" y="32" fill="#16a34a">A</text>
+        <circle cx="548" cy="25" r="23" fill="#fff" stroke="#e1e3e8"/><text x="548" y="32" fill="#0891b2">A</text>
+        <circle cx="623" cy="25" r="23" fill="#fff" stroke="#e1e3e8"/><text x="623" y="32" fill="#2563eb">A</text>
+        <circle cx="698" cy="25" r="23" fill="#fff" stroke="#e1e3e8"/><text x="698" y="32" fill="#7c3aed">A</text>
+      </g>
+      <text x="758" y="32" fill="#656b78" font-size="16">Combine either row freely / 两排颜色可自由组合</text>
+    </g>
+  </g>
+</svg>

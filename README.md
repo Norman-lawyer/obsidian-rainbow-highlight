@@ -2,53 +2,79 @@
 
 A beautiful multi-color text highlighting plugin for [Obsidian](https://obsidian.md/).
 
-Select any text and instantly apply highlights from a quick color palette popup — just like highlighting in a real book.
+一款简洁美观的 Obsidian 多彩文字高亮插件。
 
-## Features
+Select text and instantly apply a background highlight or text color from a floating palette — just like highlighting in a real book.
 
-- **Quick Color Palette** — Select text and a floating color picker appears instantly
-- **7 Vibrant Colors** — Red, Orange, Yellow, Green, Cyan, Blue, Purple
-- **Background + Text Color** — Combine a highlight background with a separate text color
-- **Format Preserving** — Keeps bold, italic, and strikethrough as Markdown
-- **Callout Support** — Highlights selected text inside rendered callouts
-- **Remove Highlight** — One-click to remove any highlight
-- **Dark Mode Support** — Colors adapt to light and dark themes
-- **Command Palette** — Each color also available as a command for keyboard shortcuts
+选中文字后，浮动调色板会立即出现。你可以像使用真实荧光笔一样设置背景高亮或文字颜色。
 
-## How to Use
+![Rainbow Highlight usage example](https://raw.githubusercontent.com/Norman-lawyer/obsidian-rainbow-highlight/main/assets/rainbow-highlight-demo.png)
 
-1. Select any text in your note
-2. A two-row color palette appears near your selection
-3. Use the first row for the background and the second row for text color
-4. Click ✕ to remove an existing highlight
+*Select text, choose a color, and keep writing without leaving the note.*
 
-## Installation
+*选中文字、挑选颜色，然后继续书写，全程无需离开当前笔记。*
 
-### From Obsidian Community Plugins
+## Features / 功能特点
 
-1. Open **Settings** → **Community plugins** → **Browse**
-2. Search for **Rainbow Highlight**
-3. Click **Install**, then **Enable**
+- **Quick Color Palette** — A floating color picker appears beside the selected text.<br>**快速调色板** — 选中文字后，浮动调色板会出现在选区旁边。
+- **7 Vibrant Colors** — Red, orange, yellow, green, cyan, blue, and purple.<br>**7 种鲜明配色** — 红、橙、黄、绿、青、蓝、紫。
+- **Background + Text Color** — Combine any background with a separate text color for 49 possible combinations.<br>**背景色 + 文字色** — 两排颜色可以自由组合，共有 49 种配色方案。
+- **Format Preserving** — Keeps bold, italic, and strikethrough content as Markdown.<br>**保留 Markdown 格式** — 粗体、斜体和删除线不会被破坏或改写。
+- **Callout Support** — Highlights selections inside rendered callouts, including multiline text.<br>**支持 Callout** — 可以高亮渲染状态下 Callout 内的文字，包括跨行内容。
+- **Remove Highlight** — Remove an existing highlight with one click.<br>**一键移除** — 点击关闭按钮即可移除已有高亮。
+- **Dark Mode Support** — Colors adapt to both light and dark themes.<br>**深色模式** — 配色会同时适配浅色与深色主题。
+- **Command Palette** — Every background and text color is also available as a command.<br>**命令面板** — 每一种背景色和文字色都可以通过命令调用并设置快捷键。
 
-### Manual Installation
+## How to Use / 使用方法
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/Norman-lawyer/obsidian-rainbow-highlight/releases)
-2. Create a folder `rainbow-highlight` in your vault's `.obsidian/plugins/` directory
-3. Copy the three files into that folder
-4. Enable the plugin in **Settings** → **Community plugins**
+1. Select any text in your note.<br>在笔记中选中需要强调的文字。
+2. A two-row color palette appears near the selection.<br>选区附近会出现一个双排调色板。
+3. Use the first row for the background and the second row for text color.<br>第一排设置背景色，第二排设置文字颜色。
+4. Select another color to recolor an existing highlight, or select × to remove it.<br>重新选择颜色即可换色，点击 × 可以移除高亮。
 
-## Colors
+### Example / 使用示例
 
-| Color  | Preview |
-|--------|---------|
-| Red    | `#fee2e2` |
-| Orange | `#ffedd5` |
-| Yellow | `#fef3c7` |
-| Green  | `#d1fae5` |
-| Cyan   | `#cffafe` |
-| Blue   | `#dbeafe` |
-| Purple | `#ede9fe` |
+Highlight a conclusion in yellow, mark an action item in green, or combine a background with a contrasting text color.
 
-## License
+你可以用黄色标记核心结论、用绿色标记行动事项，也可以组合背景色与文字颜色，建立清晰的信息层级。
 
-[MIT](LICENSE)
+The plugin stores highlights as readable HTML inside your Markdown file:
+
+插件会将高亮以清晰可读的 HTML 形式保存在 Markdown 文件中：
+
+```html
+<mark class="hl-yellow">Important text / 重要内容</mark>
+```
+
+## Colors / 配色
+
+Choose from seven background colors and seven text colors. The exact palette is shown below.
+
+你可以分别选择 7 种背景色和 7 种文字色，实际色彩如下图所示。
+
+![Rainbow Highlight color palette](https://raw.githubusercontent.com/Norman-lawyer/obsidian-rainbow-highlight/main/assets/rainbow-highlight-colors.png)
+
+Legacy pink highlights remain fully supported, even though pink is not currently shown in the picker.
+
+旧版本生成的粉色高亮仍可正常显示，但当前调色板中暂未提供粉色按钮。
+
+## Installation / 安装
+
+### From Obsidian Community Plugins / 从 Obsidian 插件市场安装
+
+1. Open **Settings → Community plugins → Browse**.<br>打开 **设置 → 第三方插件 → 浏览**。
+2. Search for **Rainbow Highlight**.<br>搜索 **Rainbow Highlight**。
+3. Select **Install**, then **Enable**.<br>点击 **安装**，然后点击 **启用**。
+
+### Manual Installation / 手动安装
+
+1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/Norman-lawyer/obsidian-rainbow-highlight/releases).<br>从[最新版本](https://github.com/Norman-lawyer/obsidian-rainbow-highlight/releases)下载 `main.js`、`manifest.json` 和 `styles.css`。
+2. Create a `rainbow-highlight` folder inside your vault's `.obsidian/plugins/` directory.<br>在笔记库的 `.obsidian/plugins/` 目录中创建 `rainbow-highlight` 文件夹。
+3. Copy the three downloaded files into that folder.<br>将下载的三个文件复制到该文件夹。
+4. Enable the plugin under **Settings → Community plugins**.<br>前往 **设置 → 第三方插件** 启用插件。
+
+## License / 开源许可
+
+Released under the [MIT License](LICENSE).
+
+本项目基于 [MIT License](LICENSE) 开源。
