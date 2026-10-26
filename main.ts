@@ -4,23 +4,34 @@ import {
   applyColorToText,
   findClosestSelection,
   findPluginMarkAtOffset,
+  getSelectionColorState,
   HighlightKind,
+  removeColorFromSelection,
   removeHighlightFromSelection,
   removeHighlightsFromText,
+  selectionOverlapsProtectedMarkdown,
   SelectionInfo,
 } from "./highlight-utils";
 import {
+  getPaletteRemoveIcon,
+  getPaletteRemoveAction,
   hasUsableSelectionRect,
+  PaletteRemoveAction,
+  positionSelectionPopover,
   replaceExactSourceRange,
+  SelectionRectLike,
+  shouldQueueSelectionAfterPointerCancel,
   shouldQueueSelectionAfterPointerUp,
 } from "./selection-ui";
-
-interface HighlightColor {
-  name: string;
-  class: string;
-  color: string;
-  bg: string;
-}
+import {
+  DEFAULT_SETTINGS,
+  getEnabledHighlightColors,
+  HIGHLIGHT_COLORS,
+  HighlightColor,
+  normalizeSettings,
+  RainbowHighlightSettings,
+} from "./palette";
+import { RainbowHighlightSettingTab } from "./settings-tab";
 
 interface CmEditorView {
   state: {
@@ -30,21 +41,12 @@ interface CmEditorView {
   };
   dispatch(tr: { changes: { from: number; to: number; insert: string } }): void;
   posAtDOM?(node: Node, offset?: number): number;
+  coordsAtPos?(pos: number): DOMRect | null;
 }
 
 interface EditorWithCm extends Editor {
   cm?: CmEditorView;
 }
-
-const HIGHLIGHT_COLORS: HighlightColor[] = [
-  { name: "Red", class: "hl-red", color: "#991b1b", bg: "#ef4444" },
-  { name: "Orange", class: "hl-orange", color: "#9a3412", bg: "#fb923c" },
-  { name: "Yellow", class: "hl-yellow", color: "#946800", bg: "#facc15" },
-  { name: "Green", class: "hl-green", color: "#166534", bg: "#4ade80" },
-  { name: "Cyan", class: "hl-cyan", color: "#155e75", bg: "#22d3ee" },
-  { name: "Blue", class: "hl-blue", color: "#1e40af", bg: "#60a5fa" },
-  { name: "Purple", class: "hl-purple", color: "#5b21b6", bg: "#a78bfa" },
-];
 
 function getCmView(editor: Editor): CmEditorView | null {
   return (editor as EditorWithCm).cm ?? null;
@@ -122,13 +124,20 @@ function getSelection(
 }
 
 export default class RainbowHighlightPlugin extends Plugin {
+  settings: RainbowHighlightSettings = {
+    ...DEFAULT_SETTINGS,
+    enabledColorIds: [...DEFAULT_SETTINGS.enabledColorIds],
+  };
   private popover: HTMLElement | null = null;
   private currentSelection: SelectionInfo | null = null;
   private selectionTimer: number | null = null;
   private ignoreSelectionUntil = 0;
   private pointerIsDown = false;
 
-  onload() {
+  async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new RainbowHighlightSettingTab(this.app, this));
+
     this.registerDomEvent(document, "pointerdown", () => {
       this.pointerIsDown = true;
     });
@@ -141,20 +150,40 @@ export default class RainbowHighlightPlugin extends Plugin {
           event.target as Node | null
         )
       ) {
-        this.queueSelection(30);
+        this.queueSelection(this.settings.popupDelay);
       }
     });
 
     this.registerDomEvent(document, "pointercancel", () => {
+      const pointerWasDown = this.pointerIsDown;
       this.pointerIsDown = false;
+      if (shouldQueueSelectionAfterPointerCancel(pointerWasDown)) {
+        this.queueSelection(this.settings.popupDelay);
+      }
+    });
+
+    // Electron can occasionally finish a text drag with mouseup but without a
+    // matching pointerup. Only use this as a fallback when the pointer flag is
+    // still set, so normal gestures are not scheduled twice.
+    this.registerDomEvent(document, "mouseup", (event: MouseEvent) => {
+      if (!this.pointerIsDown) return;
+      this.pointerIsDown = false;
+      if (
+        shouldQueueSelectionAfterPointerUp(
+          this.popover,
+          event.target as Node | null
+        )
+      ) {
+        this.queueSelection(this.settings.popupDelay);
+      }
     });
 
     this.registerDomEvent(document, "selectionchange", () => {
-      if (!this.pointerIsDown) this.queueSelection(80);
+      if (!this.pointerIsDown) this.queueSelection(this.settings.popupDelay);
     });
 
     this.registerDomEvent(document, "keyup", (event: KeyboardEvent) => {
-      if (event.shiftKey) this.queueSelection(10);
+      if (event.shiftKey) this.queueSelection(this.settings.popupDelay);
     });
 
     this.registerDomEvent(document, "mousedown", (event: MouseEvent) => {
@@ -180,9 +209,28 @@ export default class RainbowHighlightPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "show-color-palette",
+      name: "Show color palette",
+      editorCallback: (editor: Editor) => this.showPaletteFromCommand(editor),
+    });
+    this.addCommand({
       id: "remove-highlight",
       name: "Remove highlight",
       editorCallback: (editor: Editor) => this.removeHighlight(editor),
+    });
+    this.addCommand({
+      id: "remove-background-color",
+      name: "Remove background color",
+      editorCallback: (editor: Editor) => this.removeColor(editor, "bg"),
+    });
+    this.addCommand({
+      id: "remove-text-color",
+      name: "Remove text color",
+      editorCallback: (editor: Editor) => this.removeColor(editor, "text"),
+    });
+
+    this.app.workspace.onLayoutReady(() => {
+      void this.showWelcomeOnce();
     });
   }
 
@@ -201,6 +249,10 @@ export default class RainbowHighlightPlugin extends Plugin {
 
   private handleSelection() {
     if (Date.now() < this.ignoreSelectionUntil) return;
+    if (!this.settings.autoOpenPalette) {
+      this.removePopover(true);
+      return;
+    }
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!activeView) {
       this.removePopover(true);
@@ -216,12 +268,22 @@ export default class RainbowHighlightPlugin extends Plugin {
 
     const editor = activeView.editor;
     const isPreview = activeView.getMode() === "preview";
+    const sourceText = isPreview
+      ? activeView.getViewData()
+      : getCmView(editor)?.state.doc.toString();
     const selectionInfo = getSelection(
       editor,
       isPreview,
-      isPreview ? activeView.getViewData() : undefined
+      sourceText
     );
     if (!selectionInfo || !domSelection || domSelection.rangeCount === 0) {
+      this.removePopover(true);
+      return;
+    }
+    if (
+      sourceText &&
+      selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)
+    ) {
       this.removePopover(true);
       return;
     }
@@ -235,41 +297,78 @@ export default class RainbowHighlightPlugin extends Plugin {
     this.showPopover(rect, editor);
   }
 
-  private showPopover(rect: DOMRect, editor: Editor) {
+  private showPopover(rect: SelectionRectLike, editor: Editor) {
     this.removePopover(false);
 
     const popover = document.createElement("div");
     popover.addClass("hl-popover");
+    popover.setAttribute("role", "toolbar");
+    popover.setAttribute("aria-label", "Rainbow Highlight colors");
     popover.addEventListener("mousedown", (event) => {
       // Keep the note selection alive until the palette action uses it.
       event.preventDefault();
       event.stopPropagation();
     });
+    popover.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.removePopover(true);
+        return;
+      }
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+        return;
+      }
+      const buttons = Array.from(
+        popover.querySelectorAll<HTMLButtonElement>("button")
+      );
+      const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if (current < 0) return;
+      const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+      event.preventDefault();
+      buttons[(current + step + buttons.length) % buttons.length]?.focus();
+    });
     const container = document.createElement("div");
     container.addClass("hl-popover-colors");
 
-    const backgroundRow = this.buildRow(editor, "bg", "Background");
-    backgroundRow.appendChild(this.buildRemoveButton(editor));
+    const sourceText = this.getSourceText(editor);
+    const colorState = sourceText && this.currentSelection
+      ? getSelectionColorState(sourceText, this.currentSelection)
+      : { bg: null, text: null };
+    const backgroundRow = this.buildRow(
+      editor,
+      "bg",
+      "Background",
+      colorState.bg
+    );
+    backgroundRow.appendChild(
+      this.buildRemoveButton(editor, getPaletteRemoveAction("bg"))
+    );
     container.appendChild(backgroundRow);
-    container.appendChild(this.buildRow(editor, "text", "Text"));
+    const textRow = this.buildRow(editor, "text", "Text", colorState.text);
+    textRow.appendChild(
+      this.buildRemoveButton(editor, getPaletteRemoveAction("text"))
+    );
+    container.appendChild(textRow);
     popover.appendChild(container);
     document.body.appendChild(popover);
 
     const popoverRect = popover.getBoundingClientRect();
-    let top = rect.top - popoverRect.height - 8;
-    let left = rect.left + rect.width / 2 - popoverRect.width / 2;
-    if (top < 8) top = rect.bottom + 8;
-    left = Math.max(8, Math.min(left, window.innerWidth - popoverRect.width - 8));
+    const position = positionSelectionPopover(
+      rect,
+      popoverRect,
+      { width: window.innerWidth, height: window.innerHeight }
+    );
 
-    popover.style.top = `${top}px`;
-    popover.style.left = `${left}px`;
+    popover.style.top = `${position.top}px`;
+    popover.style.left = `${position.left}px`;
     this.popover = popover;
   }
 
   private buildRow(
     editor: Editor,
     kind: HighlightKind,
-    labelText: string
+    labelText: string,
+    activeClass: string | null
   ): HTMLElement {
     const row = document.createElement("div");
     row.addClass("hl-popover-row");
@@ -278,14 +377,26 @@ export default class RainbowHighlightPlugin extends Plugin {
     label.setAttribute("aria-label", labelText);
     label.setAttribute("title", labelText);
     setIcon(label, kind === "bg" ? "highlighter" : "type");
+    const visibleLabel = document.createElement("span");
+    visibleLabel.addClass("hl-row-label-text");
+    visibleLabel.setText(labelText);
+    label.appendChild(visibleLabel);
     row.appendChild(label);
 
-    HIGHLIGHT_COLORS.forEach((color) => {
+    getEnabledHighlightColors(this.settings).forEach((color) => {
       const circle = document.createElement("button");
       circle.addClass("hl-color-circle");
-      const tooltip = `${labelText}: ${color.name.toLowerCase()}`;
+      const colorClass = kind === "bg"
+        ? color.class
+        : color.class.replace(/^hl-/, "hlt-");
+      const isActive = activeClass === colorClass;
+      const tooltip = isActive
+        ? `Remove ${labelText.toLowerCase()}: ${color.name.toLowerCase()}`
+        : `${labelText}: ${color.name.toLowerCase()}`;
       circle.setAttribute("aria-label", tooltip);
       circle.setAttribute("title", tooltip);
+      circle.setAttribute("aria-pressed", String(isActive));
+      if (isActive) circle.addClass("is-active");
       if (kind === "bg") {
         circle.style.setProperty("--circle-bg", color.bg);
         circle.style.setProperty("--circle-border", color.color);
@@ -299,7 +410,10 @@ export default class RainbowHighlightPlugin extends Plugin {
         event.preventDefault();
         event.stopPropagation();
         this.suppressSelectionHandling();
-        void this.applyColor(editor, color, kind).finally(() => {
+        const action = isActive
+          ? this.removeColor(editor, kind)
+          : this.applyColor(editor, color, kind);
+        void action.finally(() => {
           this.removePopover(true);
         });
       });
@@ -309,17 +423,84 @@ export default class RainbowHighlightPlugin extends Plugin {
     return row;
   }
 
-  private buildRemoveButton(editor: Editor): HTMLButtonElement {
+  private showPaletteFromCommand(editor: Editor): void {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const selectionInfo = getSelection(editor);
+    if (!activeView || !selectionInfo) {
+      new Notice("Rainbow Highlight: select text first. / 请先选中文字。");
+      return;
+    }
+
+    const sourceText = this.getSourceText(editor);
+    if (
+      sourceText &&
+      selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)
+    ) {
+      new Notice(
+        "Rainbow Highlight: highlighting is unavailable inside code, math, links, or properties."
+      );
+      return;
+    }
+
+    let rect: SelectionRectLike | null = null;
+    const domSelection = window.getSelection();
+    if (
+      domSelection?.anchorNode &&
+      domSelection.rangeCount > 0 &&
+      activeView.containerEl.contains(domSelection.anchorNode)
+    ) {
+      const rangeRect = domSelection.getRangeAt(0).getBoundingClientRect();
+      if (hasUsableSelectionRect(rangeRect)) rect = rangeRect;
+    }
+
+    if (!rect) {
+      const cmView = getCmView(editor);
+      const start = cmView?.coordsAtPos?.(selectionInfo.from);
+      const end = cmView?.coordsAtPos?.(selectionInfo.to);
+      if (start && end) {
+        const left = Math.min(start.left, end.left);
+        const right = Math.max(start.right, end.right);
+        const top = Math.min(start.top, end.top);
+        const bottom = Math.max(start.bottom, end.bottom);
+        rect = {
+          top,
+          right,
+          bottom,
+          left,
+          width: right - left,
+          height: bottom - top,
+        };
+      }
+    }
+
+    if (!rect || !hasUsableSelectionRect(rect)) {
+      new Notice("Rainbow Highlight: unable to locate the selection. / 无法定位当前选区。");
+      return;
+    }
+
+    this.currentSelection = selectionInfo;
+    this.showPopover(rect, editor);
+  }
+
+  private buildRemoveButton(
+    editor: Editor,
+    action: PaletteRemoveAction
+  ): HTMLButtonElement {
     const button = document.createElement("button");
     button.addClass("hl-color-circle", "hl-remove-circle");
-    button.setAttribute("aria-label", "Remove highlight");
-    button.setAttribute("title", "Remove highlight");
-    setIcon(button, "x");
+    const label = action === "text" ? "Remove text color" : "Remove highlight";
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+    button.dataset.action = action === "text" ? "remove-text" : "remove-all";
+    setIcon(button, getPaletteRemoveIcon(action));
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       this.suppressSelectionHandling();
-      void this.removeHighlight(editor).finally(() => {
+      const removal = action === "text"
+        ? this.removeColor(editor, "text")
+        : this.removeHighlight(editor);
+      void removal.finally(() => {
         this.removePopover(true);
       });
     });
@@ -409,6 +590,16 @@ export default class RainbowHighlightPlugin extends Plugin {
     if (!selectionInfo) return;
 
     const sourceText = this.getSourceText(editor);
+    if (
+      sourceText &&
+      selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)
+    ) {
+      new Notice(
+        "Rainbow Highlight: highlighting is unavailable inside code, math, links, or properties."
+      );
+      this.currentSelection = null;
+      return;
+    }
     const newClass = kind === "bg"
       ? color.class
       : color.class.replace(/^hl-/, "hlt-");
@@ -432,15 +623,50 @@ export default class RainbowHighlightPlugin extends Plugin {
     this.currentSelection = null;
   }
 
-  private async removeHighlight(editor: Editor) {
-    let selectionInfo = this.currentSelection ?? getSelection(editor);
-    const cmView = getCmView(editor);
-    if (!selectionInfo && cmView) {
-      selectionInfo = findPluginMarkAtOffset(
-        cmView.state.doc.toString(),
-        cmView.state.selection.main.from
-      );
+  private async removeColor(editor: Editor, kind: HighlightKind) {
+    const selectionInfo = this.getSelectionOrContainingMark(editor);
+    if (!selectionInfo) return;
+
+    const sourceText = this.getSourceText(editor);
+    const edit = sourceText
+      ? removeColorFromSelection(sourceText, selectionInfo, kind)
+      : {
+          from: selectionInfo.from,
+          to: selectionInfo.to,
+          insert: removeColorFromSelection(
+            selectionInfo.text,
+            { text: selectionInfo.text, from: 0, to: selectionInfo.text.length },
+            kind
+          ).insert,
+        };
+    const editSelection = {
+      from: edit.from,
+      to: edit.to,
+      text: sourceText
+        ? sourceText.slice(edit.from, edit.to)
+        : selectionInfo.text,
+    };
+    if (await this.replaceRange(editor, edit.insert, editSelection)) {
+      this.clearDomSelection();
     }
+    this.currentSelection = null;
+  }
+
+  private getSelectionOrContainingMark(editor: Editor): SelectionInfo | null {
+    const selectionInfo = this.currentSelection ?? getSelection(editor);
+    if (selectionInfo) return selectionInfo;
+
+    const cmView = getCmView(editor);
+    return cmView
+      ? findPluginMarkAtOffset(
+          cmView.state.doc.toString(),
+          cmView.state.selection.main.from
+        )
+      : null;
+  }
+
+  private async removeHighlight(editor: Editor) {
+    const selectionInfo = this.getSelectionOrContainingMark(editor);
     if (!selectionInfo) return;
 
     const sourceText = this.getSourceText(editor);
@@ -462,5 +688,26 @@ export default class RainbowHighlightPlugin extends Plugin {
       this.clearDomSelection();
     }
     this.currentSelection = null;
+  }
+
+  async updateSettings(
+    patch: Partial<RainbowHighlightSettings>
+  ): Promise<void> {
+    this.settings = normalizeSettings({ ...this.settings, ...patch });
+    await this.saveData(this.settings);
+    this.removePopover(true);
+  }
+
+  private async loadSettings(): Promise<void> {
+    this.settings = normalizeSettings(await this.loadData());
+  }
+
+  private async showWelcomeOnce(): Promise<void> {
+    if (this.settings.hasSeenWelcome) return;
+    new Notice(
+      "Rainbow Highlight: select text to open the palette. Active colors can be removed with one click. / 选中文字即可打开调色盘，点击已选颜色可直接取消。",
+      8000
+    );
+    await this.updateSettings({ hasSeenWelcome: true });
   }
 }

@@ -100,6 +100,10 @@ mark.hlt-pink   { color: #db2777 !important; }
   height: 16px;
 }
 
+.hl-row-label-text {
+  display: none;
+}
+
 .hl-color-circle {
   display: flex;
   align-items: center;
@@ -133,6 +137,13 @@ mark.hlt-pink   { color: #db2777 !important; }
   outline-offset: 2px;
 }
 
+.hl-color-circle.is-active {
+  box-shadow:
+    0 0 0 2px var(--background-primary),
+    0 0 0 4px var(--interactive-accent) !important;
+  transform: scale(1.08);
+}
+
 .hl-text-circle {
   color: var(--circle-text) !important;
   background: var(--background-primary) !important;
@@ -164,6 +175,107 @@ mark.hlt-pink   { color: #db2777 !important; }
 .hl-remove-circle svg {
   width: 12px;
   height: 12px;
+}
+
+/* Settings */
+
+.rainbow-highlight-settings {
+  --rainbow-highlight-settings-radius: 10px;
+}
+
+.rainbow-highlight-settings-header {
+  margin-bottom: 4px;
+}
+
+.rainbow-highlight-setting-intro,
+.rainbow-highlight-palette-note {
+  max-width: 680px;
+  color: var(--text-muted);
+}
+
+.rainbow-highlight-palette-note {
+  margin: -4px 0 8px;
+}
+
+.rainbow-highlight-color-setting {
+  padding-inline: 10px;
+  border-radius: var(--rainbow-highlight-settings-radius);
+}
+
+.rainbow-highlight-color-setting:hover {
+  background: var(--background-secondary);
+}
+
+.rainbow-highlight-color-setting .setting-item-name {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.rainbow-highlight-swatch {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  background: var(--rainbow-highlight-swatch);
+  border: 1px solid var(--background-modifier-border-hover);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--background-primary);
+}
+
+@media (max-width: 480px), (pointer: coarse) {
+  .hl-popover-colors {
+    max-width: calc(100vw - 16px);
+    gap: 8px;
+    padding: 9px;
+  }
+
+  .hl-popover-row {
+    display: grid;
+    grid-template-columns: repeat(4, 44px);
+    gap: 8px;
+  }
+
+  .hl-row-icon {
+    grid-column: 1 / -1;
+    gap: 6px;
+    justify-content: flex-start;
+    width: auto;
+    height: 20px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .hl-row-label-text {
+    display: inline;
+  }
+
+  .hl-color-circle {
+    width: 44px;
+    height: 44px;
+    font-size: 15px;
+  }
+
+  .hl-color-circle:hover {
+    transform: none;
+  }
+
+  .hl-color-circle.is-active,
+  .hl-color-circle.is-active:hover {
+    transform: scale(1.06);
+  }
+
+  .hl-remove-circle {
+    margin-left: 0;
+  }
+
+  .hl-remove-circle::before {
+    display: none;
+  }
+
+  .hl-remove-circle svg {
+    width: 16px;
+    height: 16px;
+  }
 }
 
 /* Reading mode and live preview */

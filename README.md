@@ -21,7 +21,10 @@ Select text and instantly apply a background highlight or text color from a floa
 - **Background + Text Color** — Combine any background with a separate text color for 49 possible combinations.<br>**背景色 + 文字色** — 两排颜色可以自由组合，共有 49 种配色方案。
 - **Format Preserving** — Keeps bold, italic, and strikethrough content as Markdown.<br>**保留 Markdown 格式** — 粗体、斜体和删除线不会被破坏或改写。
 - **Callout Support** — Highlights selections inside rendered callouts, including multiline text.<br>**支持 Callout** — 可以高亮渲染状态下 Callout 内的文字，包括跨行内容。
-- **Remove Highlight** — Remove an existing highlight with one click.<br>**一键移除** — 点击关闭按钮即可移除已有高亮。
+- **Precise Recoloring and Removal** — Recolor selected highlighted text instantly, or remove only the selected segment without affecting the rest.<br>**精准换色与取消** — 选中已高亮文字即可直接换色，也可只取消选中部分，不影响其余内容。
+- **Native Highlight Compatibility** — The eraser also removes Obsidian `==highlight==` syntax while preserving nested bold, italic, and strikethrough formatting.<br>**兼容原生高亮** — 橡皮擦同样可取消 Obsidian 的 `==高亮==` 语法，并保留其中的粗体、斜体和删除线。
+- **Customizable Palette** — Enable or hide individual colors, control automatic opening and popup delay, and reset everything from the bilingual settings page.<br>**可自定义调色盘** — 可在中英双语设置页中显示或隐藏颜色、调整自动弹出与延时，并一键恢复默认。
+- **Desktop and Mobile Friendly** — Keyboard navigation, viewport-safe positioning, and larger touch targets make the palette comfortable on every device.<br>**桌面端与移动端友好** — 支持键盘导航、视口边界保护和更大的触控按钮。
 - **Dark Mode Support** — Colors adapt to both light and dark themes.<br>**深色模式** — 配色会同时适配浅色与深色主题。
 - **Command Palette** — Every background and text color is also available as a command.<br>**命令面板** — 每一种背景色和文字色都可以通过命令调用并设置快捷键。
 
@@ -30,7 +33,11 @@ Select text and instantly apply a background highlight or text color from a floa
 1. Select any text in your note.<br>在笔记中选中需要强调的文字。
 2. A two-row color palette appears near the selection.<br>选区附近会出现一个双排调色板。
 3. Use the first row for the background and the second row for text color.<br>第一排设置背景色，第二排设置文字颜色。
-4. Select another color to recolor an existing highlight, or select × to remove it.<br>重新选择颜色即可换色，点击 × 可以移除高亮。
+4. Select another color to recolor an existing highlight. Use the eraser on the background row to remove all highlighting, or the text eraser to remove only the text color.<br>重新选择颜色即可换色。使用背景色一行的橡皮擦取消全部高亮，或使用文字色橡皮擦仅取消文字颜色。
+
+Open **Settings → Rainbow Highlight** to customize the visible colors, automatic palette behavior, and popup delay.
+
+打开 **设置 → Rainbow Highlight**，可自定义显示的颜色、调色盘自动弹出行为与弹出延时。
 
 ### Example / 使用示例
 

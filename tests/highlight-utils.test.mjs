@@ -7,8 +7,11 @@ import {
   expandToPluginMark,
   findClosestSelection,
   findPluginMarkAtOffset,
+  getSelectionColorState,
   removeHighlightFromSelection,
+  removeColorFromSelection,
   removeHighlightsFromText,
+  selectionOverlapsProtectedMarkdown,
   wrapWithMark,
 } from "../highlight-utils.ts";
 
@@ -114,6 +117,184 @@ test("preserves text colour while recolouring selected background", () => {
     ).insert,
     '<mark class="hlt-yellow hl-blue">ab</mark>' +
       '<mark class="hl-red hlt-yellow">cdef</mark>'
+  );
+});
+
+test("recolours safely across partial boundaries of multiple highlights", () => {
+  const documentText =
+    '<mark class="hl-red">AB</mark> middle <mark class="hl-green">CD</mark>';
+  const selection = findClosestSelection(
+    documentText,
+    "B middle C",
+    documentText.indexOf("middle")
+  );
+
+  assert.ok(selection);
+  assert.deepEqual(
+    applyColorToSelection(documentText, selection, "hl-blue", "bg"),
+    {
+      from: 0,
+      to: documentText.length,
+      insert:
+        '<mark class="hl-red">A</mark>' +
+        '<mark class="hl-blue">B middle C</mark>' +
+        '<mark class="hl-green">D</mark>',
+    }
+  );
+});
+
+test("removes safely across partial boundaries of multiple highlights", () => {
+  const documentText =
+    '<mark class="hl-red">AB</mark> middle <mark class="hl-green">CD</mark>';
+  const selection = findClosestSelection(
+    documentText,
+    "B middle C",
+    documentText.indexOf("middle")
+  );
+
+  assert.ok(selection);
+  assert.deepEqual(removeHighlightFromSelection(documentText, selection), {
+    from: 0,
+    to: documentText.length,
+    insert:
+      '<mark class="hl-red">A</mark>B middle C' +
+      '<mark class="hl-green">D</mark>',
+  });
+});
+
+test("does not fragment markup when the selected colour is unchanged", () => {
+  const documentText = '<mark class="hl-red">abcdef</mark>';
+  const from = documentText.indexOf("cd");
+
+  assert.equal(
+    applyColorToSelection(
+      documentText,
+      { text: "cd", from, to: from + 2 },
+      "hl-red",
+      "bg"
+    ).insert,
+    documentText
+  );
+});
+
+test("removes only one colour kind from the selected segment", () => {
+  const documentText = '<mark class="hl-red hlt-blue">abcdef</mark>';
+  const from = documentText.indexOf("cd");
+
+  assert.equal(
+    removeColorFromSelection(
+      documentText,
+      { text: "cd", from, to: from + 2 },
+      "bg"
+    ).insert,
+    '<mark class="hl-red hlt-blue">ab</mark>' +
+      '<mark class="hlt-blue">cd</mark>' +
+      '<mark class="hl-red hlt-blue">ef</mark>'
+  );
+});
+
+test("reports uniform active background and text colours", () => {
+  const documentText = '<mark class="hl-red hlt-blue">abcdef</mark>';
+  const from = documentText.indexOf("bc");
+
+  assert.deepEqual(
+    getSelectionColorState(documentText, {
+      text: "bc",
+      from,
+      to: from + 2,
+    }),
+    { bg: "hl-red", text: "hlt-blue" }
+  );
+});
+
+test("recolours a partial nested highlight without leaving broken tags", () => {
+  const documentText =
+    '<mark class="hl-red hlt-yellow">A' +
+    '<mark class="hl-blue">BC</mark>D</mark>';
+  const selection = findClosestSelection(
+    documentText,
+    "B",
+    documentText.indexOf("B")
+  );
+
+  assert.ok(selection);
+  assert.equal(
+    applyColorToSelection(documentText, selection, "hl-green", "bg").insert,
+    '<mark class="hl-red hlt-yellow">A</mark>' +
+      '<mark class="hlt-yellow hl-green">B</mark>' +
+      '<mark class="hlt-yellow hl-blue">C</mark>' +
+      '<mark class="hl-red hlt-yellow">D</mark>'
+  );
+});
+
+test("removes one colour channel from a partial nested highlight", () => {
+  const documentText =
+    '<mark class="hl-red hlt-yellow">A' +
+    '<mark class="hl-blue">BC</mark>D</mark>';
+  const selection = findClosestSelection(
+    documentText,
+    "B",
+    documentText.indexOf("B")
+  );
+
+  assert.ok(selection);
+  assert.equal(
+    removeColorFromSelection(documentText, selection, "bg").insert,
+    '<mark class="hl-red hlt-yellow">A</mark>' +
+      '<mark class="hlt-yellow">B</mark>' +
+      '<mark class="hlt-yellow hl-blue">C</mark>' +
+      '<mark class="hl-red hlt-yellow">D</mark>'
+  );
+});
+
+test("reports the effective inner colours of a nested highlight", () => {
+  const documentText =
+    '<mark class="hl-red hlt-yellow">A' +
+    '<mark class="hl-blue">BC</mark>D</mark>';
+  const selection = findClosestSelection(
+    documentText,
+    "B",
+    documentText.indexOf("B")
+  );
+
+  assert.ok(selection);
+  assert.deepEqual(getSelectionColorState(documentText, selection), {
+    bg: "hl-blue",
+    text: "hlt-yellow",
+  });
+});
+
+test("blocks highlighting inside protected Markdown syntax", () => {
+  const cases = [
+    ["Before `code` after", "code"],
+    ["```js\nconst value = 1;\n```", "value"],
+    ["Math $E=mc^2$ end", "E=mc^2"],
+    ["Link [[Page|Alias]] end", "Alias"],
+    ["---\ntitle: Demo\n---\nBody", "Demo"],
+  ];
+
+  for (const [documentText, selectedText] of cases) {
+    const from = documentText.indexOf(selectedText);
+    assert.equal(
+      selectionOverlapsProtectedMarkdown(documentText, {
+        text: selectedText,
+        from,
+        to: from + selectedText.length,
+      }),
+      true,
+      documentText
+    );
+  }
+
+  const ordinary = "Price is $5 and ordinary text";
+  const from = ordinary.indexOf("ordinary");
+  assert.equal(
+    selectionOverlapsProtectedMarkdown(ordinary, {
+      text: "ordinary",
+      from,
+      to: from + "ordinary".length,
+    }),
+    false
   );
 });
 
@@ -282,6 +463,51 @@ test("removes the whole highlight when the full wrapper is targeted", () => {
       to: documentText.length,
     }),
     { from: 0, to: documentText.length, insert: "abcdef" }
+  );
+});
+
+test("removes an Obsidian native highlight while preserving bold formatting", () => {
+  const visibleText =
+    "边际效用递减，即你拥有的越多，对你而言，每一样额外增加的物品的价值就会越低。";
+  const documentText = `==**${visibleText}**==`;
+  const selection = findClosestSelection(documentText, visibleText, 4);
+
+  assert.ok(selection);
+  assert.deepEqual(
+    removeHighlightFromSelection(documentText, selection),
+    { from: 0, to: documentText.length, insert: `**${visibleText}**` }
+  );
+});
+
+test("removes only the selected part of a native bold highlight", () => {
+  const documentText = "==**abcdef**==";
+  const from = documentText.indexOf("cd");
+
+  assert.deepEqual(
+    removeHighlightFromSelection(documentText, {
+      text: "cd",
+      from,
+      to: from + 2,
+    }),
+    {
+      from: 0,
+      to: documentText.length,
+      insert: "**==ab==cd==ef==**",
+    }
+  );
+});
+
+test("the background eraser also removes Obsidian native highlighting", () => {
+  const documentText = "before ==hello== after";
+  const from = documentText.indexOf("hello");
+
+  assert.deepEqual(
+    removeColorFromSelection(
+      documentText,
+      { text: "hello", from, to: from + 5 },
+      "bg"
+    ),
+    { from: 7, to: 16, insert: "hello" }
   );
 });
 

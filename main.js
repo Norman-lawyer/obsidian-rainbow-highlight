@@ -22,10 +22,11 @@ __export(main_exports, {
   default: () => RainbowHighlightPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian = require("obsidian");
+var import_obsidian2 = require("obsidian");
 
 // highlight-utils.ts
 var PLUGIN_CLASS = /^(?:hl|hlt)-[\w-]+$/;
+var INLINE_WRAPPERS = ["***", "___", "**", "__", "~~", "*", "_"];
 function calloutCandidates(text) {
   const normalized = text.replace(/\r\n?/g, "\n");
   const candidates = [normalized];
@@ -113,6 +114,28 @@ function parsePluginMarks(documentText) {
   }
   return marks.sort((a, b) => a.from - b.from || b.to - a.to);
 }
+function parseNativeHighlights(documentText) {
+  const highlights = [];
+  let opening = -1;
+  for (let index = 0; index < documentText.length - 1; index += 1) {
+    if (documentText[index] !== "=" || documentText[index + 1] !== "=" || documentText[index - 1] === "\\")
+      continue;
+    if (opening < 0) {
+      opening = index;
+    } else if (index > opening + 2) {
+      highlights.push({
+        text: documentText.slice(opening, index + 2),
+        from: opening,
+        to: index + 2,
+        innerFrom: opening + 2,
+        innerTo: index
+      });
+      opening = -1;
+    }
+    index += 1;
+  }
+  return highlights;
+}
 function pluginTagRanges(documentText) {
   return parsePluginMarks(documentText).flatMap((mark) => [
     { from: mark.from, to: mark.innerFrom, kind: "open" },
@@ -153,8 +176,7 @@ function findPluginMarkAtOffset(documentText, offset) {
   return mark ? { text: mark.text, from: mark.from, to: mark.to } : null;
 }
 function wrapInline(text, colorClass) {
-  const wrappers = ["***", "___", "**", "__", "~~", "*", "_"];
-  for (const wrapper of wrappers) {
+  for (const wrapper of INLINE_WRAPPERS) {
     if (text.length > wrapper.length * 2 && text.startsWith(wrapper) && text.endsWith(wrapper)) {
       const inner = text.slice(wrapper.length, -wrapper.length);
       return `${wrapper}<mark class="${colorClass}">${inner}</mark>${wrapper}`;
@@ -219,37 +241,197 @@ function applyColorToText(text, newClass, kind) {
   }
   return wrapWithMark(removeHighlightsFromText(text), newClass);
 }
-function applyColorToSelection(documentText, selection, newClass, kind) {
-  const containingMark = parsePluginMarks(documentText).filter(
-    (mark) => selection.from >= mark.from && selection.to <= mark.to && selection.to >= mark.innerFrom && selection.from <= mark.innerTo
-  ).sort((a, b) => a.to - a.from - (b.to - b.from))[0];
-  if (!containingMark) {
+function outerPluginMarks(documentText) {
+  const marks = parsePluginMarks(documentText);
+  return marks.filter(
+    (mark) => !marks.some(
+      (other) => other !== mark && other.from <= mark.from && other.to >= mark.to
+    )
+  );
+}
+function overlapsSelectedContent(mark, selection) {
+  return Math.max(mark.innerFrom, selection.from) < Math.min(mark.innerTo, selection.to);
+}
+function mergeAdjacentPluginMarks(text) {
+  const adjacent = /<mark class="([^"]+)">((?:(?!<\/mark>)[\s\S])*)<\/mark><mark class="\1">((?:(?!<\/mark>)[\s\S])*)<\/mark>/g;
+  let previous;
+  do {
+    previous = text;
+    text = text.replace(adjacent, '<mark class="$1">$2$3</mark>');
+  } while (text !== previous);
+  return text;
+}
+function effectivePluginClasses(stack) {
+  const classes = [];
+  for (const mark of stack) {
+    for (const className of mark.classNames.split(/\s+/).filter(Boolean)) {
+      if (className.startsWith("hlt-")) {
+        for (let index = classes.length - 1; index >= 0; index -= 1) {
+          if (classes[index].startsWith("hlt-"))
+            classes.splice(index, 1);
+        }
+      } else if (className.startsWith("hl-")) {
+        for (let index = classes.length - 1; index >= 0; index -= 1) {
+          if (classes[index].startsWith("hl-"))
+            classes.splice(index, 1);
+        }
+      } else if (classes.includes(className)) {
+        continue;
+      }
+      classes.push(className);
+    }
+  }
+  return classes;
+}
+function styledChunks(documentText, from, to) {
+  const marks = parsePluginMarks(documentText).filter((mark) => mark.from >= from && mark.to <= to);
+  const events = marks.flatMap((mark) => [
+    { from: mark.from, to: mark.innerFrom, type: "open", mark },
+    { from: mark.innerTo, to: mark.to, type: "close", mark }
+  ]);
+  events.sort(
+    (a, b) => a.from - b.from || (a.type === "close" ? -1 : 1)
+  );
+  const chunks = [];
+  const stack = [];
+  let cursor = from;
+  for (const event of events) {
+    if (event.from > cursor) {
+      chunks.push({
+        from: cursor,
+        to: event.from,
+        classNames: effectivePluginClasses(stack)
+      });
+    }
+    if (event.type === "open") {
+      stack.push(event.mark);
+    } else {
+      const index = stack.lastIndexOf(event.mark);
+      if (index >= 0)
+        stack.splice(index, 1);
+    }
+    cursor = Math.max(cursor, event.to);
+  }
+  if (cursor < to) {
+    chunks.push({
+      from: cursor,
+      to,
+      classNames: effectivePluginClasses(stack)
+    });
+  }
+  return chunks;
+}
+function editSelectionAcrossMarks(documentText, selection, transform) {
+  const marks = outerPluginMarks(documentText).filter((mark) => overlapsSelectedContent(mark, selection));
+  if (marks.length === 0) {
     return {
       from: selection.from,
       to: selection.to,
-      insert: applyColorToText(selection.text, newClass, kind)
+      insert: transform(selection.text, null)
     };
   }
-  const openingTag = documentText.slice(
-    containingMark.from,
-    containingMark.innerFrom
+  const editFrom = Math.min(selection.from, ...marks.map((mark) => mark.from));
+  const editTo = Math.max(selection.to, ...marks.map((mark) => mark.to));
+  let insert = "";
+  for (const chunk of styledChunks(documentText, editFrom, editTo)) {
+    const selectedFrom = Math.min(
+      chunk.to,
+      Math.max(chunk.from, selection.from)
+    );
+    const selectedTo = Math.min(
+      chunk.to,
+      Math.max(chunk.from, selection.to)
+    );
+    const wrapOriginal = (from, to) => {
+      if (to <= from)
+        return "";
+      const value = documentText.slice(from, to);
+      return chunk.classNames.length > 0 ? wrapWithClasses(value, chunk.classNames) : value;
+    };
+    insert += wrapOriginal(chunk.from, selectedFrom);
+    if (selectedTo > selectedFrom) {
+      insert += transform(
+        documentText.slice(selectedFrom, selectedTo),
+        chunk.classNames.length > 0 ? chunk.classNames.join(" ") : null
+      );
+    }
+    insert += wrapOriginal(Math.max(selectedFrom, selectedTo), chunk.to);
+  }
+  return { from: editFrom, to: editTo, insert: mergeAdjacentPluginMarks(insert) };
+}
+function replaceColorClass(classNames, kind, newClass) {
+  const classes = classNames.split(/\s+/).filter(Boolean).filter(
+    (className) => kind === "bg" ? !className.startsWith("hl-") : !className.startsWith("hlt-")
   );
-  const closingTag = documentText.slice(
-    containingMark.innerTo,
-    containingMark.to
+  if (newClass)
+    classes.push(newClass);
+  return classes;
+}
+function wrapWithClasses(text, classes) {
+  const cleaned = removeHighlightsFromText(text);
+  return classes.length > 0 ? `<mark class="${classes.join(" ")}">${cleaned}</mark>` : cleaned;
+}
+function splitNativeHighlight(documentText, highlight, selection) {
+  var _a;
+  const inner = documentText.slice(highlight.innerFrom, highlight.innerTo);
+  const wrapper = (_a = INLINE_WRAPPERS.find(
+    (candidate) => inner.length > candidate.length * 2 && inner.startsWith(candidate) && inner.endsWith(candidate)
+  )) != null ? _a : "";
+  const contentFrom = highlight.innerFrom + wrapper.length;
+  const contentTo = highlight.innerTo - wrapper.length;
+  const selectedFrom = Math.max(contentFrom, Math.min(contentTo, selection.from));
+  const selectedTo = Math.max(selectedFrom, Math.min(contentTo, selection.to));
+  const content = documentText.slice(contentFrom, contentTo);
+  const relativeFrom = selectedFrom - contentFrom;
+  const relativeTo = selectedTo - contentFrom;
+  const before = content.slice(0, relativeFrom);
+  const selected = content.slice(relativeFrom, relativeTo);
+  const after = content.slice(relativeTo);
+  return [
+    wrapper,
+    before ? `==${before}==` : "",
+    removeHighlightsFromText(selected),
+    after ? `==${after}==` : "",
+    wrapper
+  ].join("");
+}
+function removeNativeHighlightFromSelection(documentText, selection) {
+  const highlights = parseNativeHighlights(documentText).filter(
+    (highlight) => Math.max(highlight.innerFrom, selection.from) < Math.min(highlight.innerTo, selection.to)
   );
-  const selectedFrom = Math.max(selection.from, containingMark.innerFrom);
-  const selectedTo = Math.min(selection.to, containingMark.innerTo);
-  const before = documentText.slice(containingMark.innerFrom, selectedFrom);
-  const selected = documentText.slice(selectedFrom, selectedTo);
-  const after = documentText.slice(selectedTo, containingMark.innerTo);
-  const wrapOriginal = (text) => text ? openingTag + text + closingTag : "";
-  const recoloured = selected ? applyColorToText(openingTag + selected + closingTag, newClass, kind) : "";
-  return {
-    from: containingMark.from,
-    to: containingMark.to,
-    insert: wrapOriginal(before) + recoloured + wrapOriginal(after)
-  };
+  if (highlights.length === 0)
+    return null;
+  const editFrom = Math.min(selection.from, ...highlights.map((mark) => mark.from));
+  const editTo = Math.max(selection.to, ...highlights.map((mark) => mark.to));
+  let insert = documentText.slice(editFrom, editTo);
+  for (const highlight of [...highlights].sort((a, b) => b.from - a.from)) {
+    const relativeFrom = highlight.from - editFrom;
+    const relativeTo = highlight.to - editFrom;
+    insert = insert.slice(0, relativeFrom) + splitNativeHighlight(documentText, highlight, selection) + insert.slice(relativeTo);
+  }
+  return { from: editFrom, to: editTo, insert };
+}
+function applyColorToSelection(documentText, selection, newClass, kind) {
+  return editSelectionAcrossMarks(
+    documentText,
+    selection,
+    (text, classNames) => classNames === null ? applyColorToText(text, newClass, kind) : wrapWithClasses(text, replaceColorClass(classNames, kind, newClass))
+  );
+}
+function removeColorFromSelection(documentText, selection, kind) {
+  if (kind === "bg") {
+    const nativeEdit = removeNativeHighlightFromSelection(
+      documentText,
+      selection
+    );
+    if (nativeEdit)
+      return nativeEdit;
+  }
+  return editSelectionAcrossMarks(
+    documentText,
+    selection,
+    (text, classNames) => classNames === null ? removeHighlightsFromText(text) : wrapWithClasses(text, replaceColorClass(classNames, kind, null))
+  );
 }
 function removeHighlightsFromText(text) {
   const hiddenRanges = pluginTagRanges(text);
@@ -266,43 +448,127 @@ function removeHighlightsFromText(text) {
   return result + text.slice(cursor);
 }
 function removeHighlightFromSelection(documentText, selection) {
-  const containingMark = parsePluginMarks(documentText).filter(
-    (mark) => selection.from >= mark.from && selection.to <= mark.to && selection.to >= mark.innerFrom && selection.from <= mark.innerTo
-  ).sort((a, b) => a.to - a.from - (b.to - b.from))[0];
-  if (!containingMark) {
-    return {
-      from: selection.from,
-      to: selection.to,
-      insert: removeHighlightsFromText(selection.text)
-    };
+  const nativeEdit = removeNativeHighlightFromSelection(
+    documentText,
+    selection
+  );
+  if (nativeEdit)
+    return nativeEdit;
+  return editSelectionAcrossMarks(
+    documentText,
+    selection,
+    (text, classNames) => {
+      if (classNames === null)
+        return removeHighlightsFromText(text);
+      const remaining = classNames.split(/\s+/).filter(Boolean).filter((className) => !PLUGIN_CLASS.test(className));
+      return wrapWithClasses(text, remaining);
+    }
+  );
+}
+function uniformColor(values) {
+  if (values.length === 0 || values[0] === null)
+    return null;
+  return values.every((value) => value === values[0]) ? values[0] : null;
+}
+function getSelectionColorState(documentText, selection) {
+  var _a, _b;
+  const marks = outerPluginMarks(documentText).filter((mark) => overlapsSelectedContent(mark, selection));
+  const backgrounds = [];
+  const textColors = [];
+  const rangeFrom = marks.length > 0 ? Math.min(selection.from, ...marks.map((mark) => mark.from)) : selection.from;
+  const rangeTo = marks.length > 0 ? Math.max(selection.to, ...marks.map((mark) => mark.to)) : selection.to;
+  for (const chunk of styledChunks(documentText, rangeFrom, rangeTo)) {
+    if (Math.max(chunk.from, selection.from) >= Math.min(chunk.to, selection.to))
+      continue;
+    const classes = chunk.classNames;
+    backgrounds.push((_a = classes.find((name) => name.startsWith("hl-"))) != null ? _a : null);
+    textColors.push((_b = classes.find((name) => name.startsWith("hlt-"))) != null ? _b : null);
   }
-  const openingTag = documentText.slice(
-    containingMark.from,
-    containingMark.innerFrom
-  );
-  const closingTag = documentText.slice(
-    containingMark.innerTo,
-    containingMark.to
-  );
-  const selectedFrom = Math.max(selection.from, containingMark.innerFrom);
-  const selectedTo = Math.min(selection.to, containingMark.innerTo);
-  const before = documentText.slice(containingMark.innerFrom, selectedFrom);
-  const selected = documentText.slice(selectedFrom, selectedTo);
-  const after = documentText.slice(selectedTo, containingMark.innerTo);
-  const wrap = (text) => text ? openingTag + text + closingTag : "";
   return {
-    from: containingMark.from,
-    to: containingMark.to,
-    insert: wrap(before) + removeHighlightsFromText(selected) + wrap(after)
+    bg: uniformColor(backgrounds),
+    text: uniformColor(textColors)
   };
+}
+function protectedMarkdownRanges(documentText) {
+  var _a;
+  const ranges = [];
+  const addMatches = (pattern) => {
+    let match;
+    while ((match = pattern.exec(documentText)) !== null) {
+      ranges.push({ from: match.index, to: match.index + match[0].length });
+      if (match[0].length === 0)
+        pattern.lastIndex += 1;
+    }
+  };
+  const frontmatter = documentText.match(
+    /^(?:\uFEFF)?---[ \t]*\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/
+  );
+  if (frontmatter)
+    ranges.push({ from: 0, to: frontmatter[0].length });
+  let fence = null;
+  const linePattern = /.*(?:\n|$)/g;
+  let line;
+  while ((line = linePattern.exec(documentText)) !== null && line[0]) {
+    const content = line[0].replace(/\r?\n$/, "");
+    const marker = (_a = content.match(/^ {0,3}(`{3,}|~{3,})/)) == null ? void 0 : _a[1];
+    if (!fence && marker) {
+      fence = { from: line.index, character: marker[0], length: marker.length };
+    } else if (fence && new RegExp(`^ {0,3}${fence.character}{${fence.length},}[ \\t]*$`).test(content)) {
+      ranges.push({ from: fence.from, to: line.index + line[0].length });
+      fence = null;
+    }
+  }
+  if (fence)
+    ranges.push({ from: fence.from, to: documentText.length });
+  addMatches(/!?\[\[[\s\S]*?\]\]/g);
+  addMatches(/(`+)([\s\S]*?)\1/g);
+  addMatches(/\$\$[\s\S]*?\$\$/g);
+  for (let index = 0; index < documentText.length; index += 1) {
+    if (documentText[index] !== "$" || documentText[index - 1] === "\\" || documentText[index + 1] === "$")
+      continue;
+    for (let end = index + 1; end < documentText.length; end += 1) {
+      if (documentText[end] === "\n")
+        break;
+      if (documentText[end] === "$" && documentText[end - 1] !== "\\" && documentText[end + 1] !== "$") {
+        ranges.push({ from: index, to: end + 1 });
+        index = end;
+        break;
+      }
+    }
+  }
+  return ranges;
+}
+function selectionOverlapsProtectedMarkdown(documentText, selection) {
+  return protectedMarkdownRanges(documentText).some(
+    (range) => selection.from < range.to && selection.to > range.from
+  );
 }
 
 // selection-ui.ts
+function getPaletteRemoveAction(kind) {
+  return kind === "bg" ? "all" : "text";
+}
+function getPaletteRemoveIcon(action) {
+  return action === "all" ? "eraser" : "remove-formatting";
+}
 function shouldQueueSelectionAfterPointerUp(popover, target) {
   return !popover || !popover.contains(target);
 }
+function shouldQueueSelectionAfterPointerCancel(pointerWasDown) {
+  return pointerWasDown;
+}
 function hasUsableSelectionRect(rect) {
   return [rect.top, rect.right, rect.bottom, rect.left, rect.width, rect.height].every(Number.isFinite) && (rect.width > 0 || rect.height > 0);
+}
+function positionSelectionPopover(rect, popover, viewport, padding = 8) {
+  const preferredTop = rect.top - popover.height - padding >= padding ? rect.top - popover.height - padding : rect.bottom + padding;
+  const maxTop = Math.max(padding, viewport.height - popover.height - padding);
+  const preferredLeft = rect.left + rect.width / 2 - popover.width / 2;
+  const maxLeft = Math.max(padding, viewport.width - popover.width - padding);
+  return {
+    top: Math.max(padding, Math.min(preferredTop, maxTop)),
+    left: Math.max(padding, Math.min(preferredLeft, maxLeft))
+  };
 }
 function replaceExactSourceRange(source, selection, replacement) {
   if (selection.from < 0 || selection.to < selection.from || selection.to > source.length || source.slice(selection.from, selection.to) !== selection.text) {
@@ -311,16 +577,116 @@ function replaceExactSourceRange(source, selection, replacement) {
   return source.slice(0, selection.from) + replacement + source.slice(selection.to);
 }
 
-// main.ts
+// palette.ts
 var HIGHLIGHT_COLORS = [
-  { name: "Red", class: "hl-red", color: "#991b1b", bg: "#ef4444" },
-  { name: "Orange", class: "hl-orange", color: "#9a3412", bg: "#fb923c" },
-  { name: "Yellow", class: "hl-yellow", color: "#946800", bg: "#facc15" },
-  { name: "Green", class: "hl-green", color: "#166534", bg: "#4ade80" },
-  { name: "Cyan", class: "hl-cyan", color: "#155e75", bg: "#22d3ee" },
-  { name: "Blue", class: "hl-blue", color: "#1e40af", bg: "#60a5fa" },
-  { name: "Purple", class: "hl-purple", color: "#5b21b6", bg: "#a78bfa" }
+  { id: "red", name: "Red", class: "hl-red", color: "#991b1b", bg: "#ef4444" },
+  { id: "orange", name: "Orange", class: "hl-orange", color: "#9a3412", bg: "#fb923c" },
+  { id: "yellow", name: "Yellow", class: "hl-yellow", color: "#946800", bg: "#facc15" },
+  { id: "green", name: "Green", class: "hl-green", color: "#166534", bg: "#4ade80" },
+  { id: "cyan", name: "Cyan", class: "hl-cyan", color: "#155e75", bg: "#22d3ee" },
+  { id: "blue", name: "Blue", class: "hl-blue", color: "#1e40af", bg: "#60a5fa" },
+  { id: "purple", name: "Purple", class: "hl-purple", color: "#5b21b6", bg: "#a78bfa" }
 ];
+var DEFAULT_SETTINGS = {
+  enabledColorIds: HIGHLIGHT_COLORS.map((color) => color.id),
+  autoOpenPalette: true,
+  popupDelay: 40,
+  hasSeenWelcome: false
+};
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+function normalizeSettings(raw) {
+  const data = isRecord(raw) ? raw : {};
+  const validIds = new Set(HIGHLIGHT_COLORS.map((color) => color.id));
+  const enabledColorIds = Array.isArray(data.enabledColorIds) ? Array.from(new Set(
+    data.enabledColorIds.filter(
+      (id) => typeof id === "string" && validIds.has(id)
+    )
+  )) : [];
+  const savedDelay = typeof data.popupDelay === "number" && Number.isFinite(data.popupDelay) ? Math.round(data.popupDelay) : DEFAULT_SETTINGS.popupDelay;
+  return {
+    enabledColorIds: enabledColorIds.length > 0 ? enabledColorIds : [...DEFAULT_SETTINGS.enabledColorIds],
+    autoOpenPalette: typeof data.autoOpenPalette === "boolean" ? data.autoOpenPalette : DEFAULT_SETTINGS.autoOpenPalette,
+    popupDelay: Math.max(0, Math.min(200, savedDelay)),
+    hasSeenWelcome: typeof data.hasSeenWelcome === "boolean" ? data.hasSeenWelcome : DEFAULT_SETTINGS.hasSeenWelcome
+  };
+}
+function getEnabledHighlightColors(settings) {
+  const enabled = new Set(settings.enabledColorIds);
+  return HIGHLIGHT_COLORS.filter((color) => enabled.has(color.id));
+}
+
+// settings-tab.ts
+var import_obsidian = require("obsidian");
+var RainbowHighlightSettingTab = class extends import_obsidian.PluginSettingTab {
+  constructor(app, owner) {
+    super(app, owner);
+    this.owner = owner;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.addClass("rainbow-highlight-settings");
+    containerEl.createEl("h2", {
+      text: "Rainbow Highlight",
+      cls: "rainbow-highlight-settings-header"
+    });
+    containerEl.createEl("p", {
+      text: "Tune the palette without changing existing highlights. \u81EA\u5B9A\u4E49\u8C03\u8272\u76D8\uFF0C\u4E0D\u4F1A\u5F71\u54CD\u5DF2\u6709\u9AD8\u4EAE\u3002",
+      cls: "rainbow-highlight-setting-intro"
+    });
+    new import_obsidian.Setting(containerEl).setName("Behavior / \u4EA4\u4E92").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Auto-open palette / \u81EA\u52A8\u6253\u5F00\u8C03\u8272\u76D8").setDesc("Show the palette after selecting text. \u9009\u4E2D\u6587\u5B57\u540E\u81EA\u52A8\u663E\u793A\u8C03\u8272\u76D8\u3002").addToggle((toggle) => {
+      toggle.setValue(this.owner.settings.autoOpenPalette).onChange(async (value) => {
+        await this.owner.updateSettings({ autoOpenPalette: value });
+      });
+    });
+    new import_obsidian.Setting(containerEl).setName("Palette delay / \u8C03\u8272\u76D8\u5EF6\u65F6").setDesc("A short delay helps complex selections settle. \u9002\u5F53\u5EF6\u65F6\u53EF\u63D0\u9AD8\u590D\u6742\u9009\u533A\u7684\u7A33\u5B9A\u6027\u3002").addSlider((slider) => {
+      slider.setLimits(0, 200, 10).setValue(this.owner.settings.popupDelay).setDisplayFormat((value) => `${value} ms`).onChange(async (value) => {
+        await this.owner.updateSettings({ popupDelay: value });
+      });
+    });
+    new import_obsidian.Setting(containerEl).setName("Palette colors / \u8C03\u8272\u76D8\u914D\u8272").setHeading();
+    containerEl.createEl("p", {
+      text: "Hidden colors remain available as commands and existing notes keep their appearance. \u9690\u85CF\u7684\u989C\u8272\u4ECD\u53EF\u901A\u8FC7\u547D\u4EE4\u4F7F\u7528\uFF0C\u4E5F\u4E0D\u4F1A\u6539\u53D8\u65E7\u7B14\u8BB0\u3002",
+      cls: "setting-item-description rainbow-highlight-palette-note"
+    });
+    HIGHLIGHT_COLORS.forEach((color) => {
+      const setting = new import_obsidian.Setting(containerEl).setName(color.name).setDesc(`${color.class} / ${color.class.replace(/^hl-/, "hlt-")}`).setClass("rainbow-highlight-color-setting");
+      const swatch = document.createElement("span");
+      swatch.addClass("rainbow-highlight-swatch");
+      swatch.style.setProperty("--rainbow-highlight-swatch", color.bg);
+      swatch.setAttribute("aria-hidden", "true");
+      setting.nameEl.prepend(swatch);
+      setting.addToggle((toggle) => {
+        toggle.setValue(this.owner.settings.enabledColorIds.includes(color.id)).onChange(async (enabled) => {
+          const current = this.owner.settings.enabledColorIds;
+          if (!enabled && current.length === 1 && current.includes(color.id)) {
+            toggle.setValue(true);
+            new import_obsidian.Notice("Rainbow Highlight: keep at least one palette color. / \u8BF7\u81F3\u5C11\u4FDD\u7559\u4E00\u79CD\u989C\u8272\u3002");
+            return;
+          }
+          const enabledColorIds = enabled ? [...current, color.id] : current.filter((id) => id !== color.id);
+          await this.owner.updateSettings({ enabledColorIds });
+        });
+      });
+    });
+    new import_obsidian.Setting(containerEl).setName("Reset settings / \u6062\u590D\u9ED8\u8BA4").setDesc("Restore all seven colors and the default palette behavior. \u6062\u590D 7 \u79CD\u914D\u8272\u548C\u9ED8\u8BA4\u4EA4\u4E92\u3002").addButton((button) => {
+      button.setButtonText("Reset / \u91CD\u7F6E").onClick(async () => {
+        await this.owner.updateSettings({
+          enabledColorIds: [...DEFAULT_SETTINGS.enabledColorIds],
+          autoOpenPalette: DEFAULT_SETTINGS.autoOpenPalette,
+          popupDelay: DEFAULT_SETTINGS.popupDelay
+        });
+        this.display();
+        new import_obsidian.Notice("Rainbow Highlight: settings reset. / \u8BBE\u7F6E\u5DF2\u91CD\u7F6E\u3002");
+      });
+    });
+  }
+};
+
+// main.ts
 function getCmView(editor) {
   var _a;
   return (_a = editor.cm) != null ? _a : null;
@@ -383,16 +749,22 @@ function getSelection(editor, preferDomSelection = false, sourceText) {
   }
   return getDomSelection(editor);
 }
-var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
+var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
   constructor() {
     super(...arguments);
+    this.settings = {
+      ...DEFAULT_SETTINGS,
+      enabledColorIds: [...DEFAULT_SETTINGS.enabledColorIds]
+    };
     this.popover = null;
     this.currentSelection = null;
     this.selectionTimer = null;
     this.ignoreSelectionUntil = 0;
     this.pointerIsDown = false;
   }
-  onload() {
+  async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new RainbowHighlightSettingTab(this.app, this));
     this.registerDomEvent(document, "pointerdown", () => {
       this.pointerIsDown = true;
     });
@@ -402,19 +774,34 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
         this.popover,
         event.target
       )) {
-        this.queueSelection(30);
+        this.queueSelection(this.settings.popupDelay);
       }
     });
     this.registerDomEvent(document, "pointercancel", () => {
+      const pointerWasDown = this.pointerIsDown;
       this.pointerIsDown = false;
+      if (shouldQueueSelectionAfterPointerCancel(pointerWasDown)) {
+        this.queueSelection(this.settings.popupDelay);
+      }
+    });
+    this.registerDomEvent(document, "mouseup", (event) => {
+      if (!this.pointerIsDown)
+        return;
+      this.pointerIsDown = false;
+      if (shouldQueueSelectionAfterPointerUp(
+        this.popover,
+        event.target
+      )) {
+        this.queueSelection(this.settings.popupDelay);
+      }
     });
     this.registerDomEvent(document, "selectionchange", () => {
       if (!this.pointerIsDown)
-        this.queueSelection(80);
+        this.queueSelection(this.settings.popupDelay);
     });
     this.registerDomEvent(document, "keyup", (event) => {
       if (event.shiftKey)
-        this.queueSelection(10);
+        this.queueSelection(this.settings.popupDelay);
     });
     this.registerDomEvent(document, "mousedown", (event) => {
       if (this.popover && !this.popover.contains(event.target)) {
@@ -436,9 +823,27 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
       });
     });
     this.addCommand({
+      id: "show-color-palette",
+      name: "Show color palette",
+      editorCallback: (editor) => this.showPaletteFromCommand(editor)
+    });
+    this.addCommand({
       id: "remove-highlight",
       name: "Remove highlight",
       editorCallback: (editor) => this.removeHighlight(editor)
+    });
+    this.addCommand({
+      id: "remove-background-color",
+      name: "Remove background color",
+      editorCallback: (editor) => this.removeColor(editor, "bg")
+    });
+    this.addCommand({
+      id: "remove-text-color",
+      name: "Remove text color",
+      editorCallback: (editor) => this.removeColor(editor, "text")
+    });
+    this.app.workspace.onLayoutReady(() => {
+      void this.showWelcomeOnce();
     });
   }
   onunload() {
@@ -455,9 +860,14 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     }, delay);
   }
   handleSelection() {
+    var _a;
     if (Date.now() < this.ignoreSelectionUntil)
       return;
-    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    if (!this.settings.autoOpenPalette) {
+      this.removePopover(true);
+      return;
+    }
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
     if (!activeView) {
       this.removePopover(true);
       return;
@@ -470,12 +880,17 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     }
     const editor = activeView.editor;
     const isPreview = activeView.getMode() === "preview";
+    const sourceText = isPreview ? activeView.getViewData() : (_a = getCmView(editor)) == null ? void 0 : _a.state.doc.toString();
     const selectionInfo = getSelection(
       editor,
       isPreview,
-      isPreview ? activeView.getViewData() : void 0
+      sourceText
     );
     if (!selectionInfo || !domSelection || domSelection.rangeCount === 0) {
+      this.removePopover(true);
+      return;
+    }
+    if (sourceText && selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)) {
       this.removePopover(true);
       return;
     }
@@ -491,43 +906,87 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     this.removePopover(false);
     const popover = document.createElement("div");
     popover.addClass("hl-popover");
+    popover.setAttribute("role", "toolbar");
+    popover.setAttribute("aria-label", "Rainbow Highlight colors");
     popover.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
     });
+    popover.addEventListener("keydown", (event) => {
+      var _a;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.removePopover(true);
+        return;
+      }
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+        return;
+      }
+      const buttons = Array.from(
+        popover.querySelectorAll("button")
+      );
+      const current = buttons.indexOf(document.activeElement);
+      if (current < 0)
+        return;
+      const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+      event.preventDefault();
+      (_a = buttons[(current + step + buttons.length) % buttons.length]) == null ? void 0 : _a.focus();
+    });
     const container = document.createElement("div");
     container.addClass("hl-popover-colors");
-    const backgroundRow = this.buildRow(editor, "bg", "Background");
-    backgroundRow.appendChild(this.buildRemoveButton(editor));
+    const sourceText = this.getSourceText(editor);
+    const colorState = sourceText && this.currentSelection ? getSelectionColorState(sourceText, this.currentSelection) : { bg: null, text: null };
+    const backgroundRow = this.buildRow(
+      editor,
+      "bg",
+      "Background",
+      colorState.bg
+    );
+    backgroundRow.appendChild(
+      this.buildRemoveButton(editor, getPaletteRemoveAction("bg"))
+    );
     container.appendChild(backgroundRow);
-    container.appendChild(this.buildRow(editor, "text", "Text"));
+    const textRow = this.buildRow(editor, "text", "Text", colorState.text);
+    textRow.appendChild(
+      this.buildRemoveButton(editor, getPaletteRemoveAction("text"))
+    );
+    container.appendChild(textRow);
     popover.appendChild(container);
     document.body.appendChild(popover);
     const popoverRect = popover.getBoundingClientRect();
-    let top = rect.top - popoverRect.height - 8;
-    let left = rect.left + rect.width / 2 - popoverRect.width / 2;
-    if (top < 8)
-      top = rect.bottom + 8;
-    left = Math.max(8, Math.min(left, window.innerWidth - popoverRect.width - 8));
-    popover.style.top = `${top}px`;
-    popover.style.left = `${left}px`;
+    const position = positionSelectionPopover(
+      rect,
+      popoverRect,
+      { width: window.innerWidth, height: window.innerHeight }
+    );
+    popover.style.top = `${position.top}px`;
+    popover.style.left = `${position.left}px`;
     this.popover = popover;
   }
-  buildRow(editor, kind, labelText) {
+  buildRow(editor, kind, labelText, activeClass) {
     const row = document.createElement("div");
     row.addClass("hl-popover-row");
     const label = document.createElement("div");
     label.addClass("hl-row-icon");
     label.setAttribute("aria-label", labelText);
     label.setAttribute("title", labelText);
-    (0, import_obsidian.setIcon)(label, kind === "bg" ? "highlighter" : "type");
+    (0, import_obsidian2.setIcon)(label, kind === "bg" ? "highlighter" : "type");
+    const visibleLabel = document.createElement("span");
+    visibleLabel.addClass("hl-row-label-text");
+    visibleLabel.setText(labelText);
+    label.appendChild(visibleLabel);
     row.appendChild(label);
-    HIGHLIGHT_COLORS.forEach((color) => {
+    getEnabledHighlightColors(this.settings).forEach((color) => {
       const circle = document.createElement("button");
       circle.addClass("hl-color-circle");
-      const tooltip = `${labelText}: ${color.name.toLowerCase()}`;
+      const colorClass = kind === "bg" ? color.class : color.class.replace(/^hl-/, "hlt-");
+      const isActive = activeClass === colorClass;
+      const tooltip = isActive ? `Remove ${labelText.toLowerCase()}: ${color.name.toLowerCase()}` : `${labelText}: ${color.name.toLowerCase()}`;
       circle.setAttribute("aria-label", tooltip);
       circle.setAttribute("title", tooltip);
+      circle.setAttribute("aria-pressed", String(isActive));
+      if (isActive)
+        circle.addClass("is-active");
       if (kind === "bg") {
         circle.style.setProperty("--circle-bg", color.bg);
         circle.style.setProperty("--circle-border", color.color);
@@ -540,7 +999,8 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
         event.preventDefault();
         event.stopPropagation();
         this.suppressSelectionHandling();
-        void this.applyColor(editor, color, kind).finally(() => {
+        const action = isActive ? this.removeColor(editor, kind) : this.applyColor(editor, color, kind);
+        void action.finally(() => {
           this.removePopover(true);
         });
       });
@@ -548,17 +1008,68 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     });
     return row;
   }
-  buildRemoveButton(editor) {
+  showPaletteFromCommand(editor) {
+    var _a, _b;
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
+    const selectionInfo = getSelection(editor);
+    if (!activeView || !selectionInfo) {
+      new import_obsidian2.Notice("Rainbow Highlight: select text first. / \u8BF7\u5148\u9009\u4E2D\u6587\u5B57\u3002");
+      return;
+    }
+    const sourceText = this.getSourceText(editor);
+    if (sourceText && selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)) {
+      new import_obsidian2.Notice(
+        "Rainbow Highlight: highlighting is unavailable inside code, math, links, or properties."
+      );
+      return;
+    }
+    let rect = null;
+    const domSelection = window.getSelection();
+    if ((domSelection == null ? void 0 : domSelection.anchorNode) && domSelection.rangeCount > 0 && activeView.containerEl.contains(domSelection.anchorNode)) {
+      const rangeRect = domSelection.getRangeAt(0).getBoundingClientRect();
+      if (hasUsableSelectionRect(rangeRect))
+        rect = rangeRect;
+    }
+    if (!rect) {
+      const cmView = getCmView(editor);
+      const start = (_a = cmView == null ? void 0 : cmView.coordsAtPos) == null ? void 0 : _a.call(cmView, selectionInfo.from);
+      const end = (_b = cmView == null ? void 0 : cmView.coordsAtPos) == null ? void 0 : _b.call(cmView, selectionInfo.to);
+      if (start && end) {
+        const left = Math.min(start.left, end.left);
+        const right = Math.max(start.right, end.right);
+        const top = Math.min(start.top, end.top);
+        const bottom = Math.max(start.bottom, end.bottom);
+        rect = {
+          top,
+          right,
+          bottom,
+          left,
+          width: right - left,
+          height: bottom - top
+        };
+      }
+    }
+    if (!rect || !hasUsableSelectionRect(rect)) {
+      new import_obsidian2.Notice("Rainbow Highlight: unable to locate the selection. / \u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u9009\u533A\u3002");
+      return;
+    }
+    this.currentSelection = selectionInfo;
+    this.showPopover(rect, editor);
+  }
+  buildRemoveButton(editor, action) {
     const button = document.createElement("button");
     button.addClass("hl-color-circle", "hl-remove-circle");
-    button.setAttribute("aria-label", "Remove highlight");
-    button.setAttribute("title", "Remove highlight");
-    (0, import_obsidian.setIcon)(button, "x");
+    const label = action === "text" ? "Remove text color" : "Remove highlight";
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+    button.dataset.action = action === "text" ? "remove-text" : "remove-all";
+    (0, import_obsidian2.setIcon)(button, getPaletteRemoveIcon(action));
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       this.suppressSelectionHandling();
-      void this.removeHighlight(editor).finally(() => {
+      const removal = action === "text" ? this.removeColor(editor, "text") : this.removeHighlight(editor);
+      void removal.finally(() => {
         this.removePopover(true);
       });
     });
@@ -590,13 +1101,13 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
   }
   getSourceText(editor) {
     var _a, _b;
-    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
     if ((activeView == null ? void 0 : activeView.getMode()) === "preview")
       return activeView.getViewData();
     return (_b = (_a = getCmView(editor)) == null ? void 0 : _a.state.doc.toString()) != null ? _b : null;
   }
   async replaceRange(editor, replacement, selectionInfo) {
-    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
     if ((activeView == null ? void 0 : activeView.getMode()) === "preview" && activeView.file) {
       try {
         await this.app.vault.process(activeView.file, (source) => {
@@ -611,7 +1122,7 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
         });
         return true;
       } catch (e) {
-        new import_obsidian.Notice("Rainbow Highlight: selection changed; please select the text again.");
+        new import_obsidian2.Notice("Rainbow Highlight: selection changed; please select the text again.");
         return false;
       }
     }
@@ -639,6 +1150,13 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     if (!selectionInfo)
       return;
     const sourceText = this.getSourceText(editor);
+    if (sourceText && selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)) {
+      new import_obsidian2.Notice(
+        "Rainbow Highlight: highlighting is unavailable inside code, math, links, or properties."
+      );
+      this.currentSelection = null;
+      return;
+    }
     const newClass = kind === "bg" ? color.class : color.class.replace(/^hl-/, "hlt-");
     const edit = sourceText ? applyColorToSelection(sourceText, selectionInfo, newClass, kind) : {
       from: selectionInfo.from,
@@ -655,16 +1173,43 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     }
     this.currentSelection = null;
   }
-  async removeHighlight(editor) {
-    var _a;
-    let selectionInfo = (_a = this.currentSelection) != null ? _a : getSelection(editor);
-    const cmView = getCmView(editor);
-    if (!selectionInfo && cmView) {
-      selectionInfo = findPluginMarkAtOffset(
-        cmView.state.doc.toString(),
-        cmView.state.selection.main.from
-      );
+  async removeColor(editor, kind) {
+    const selectionInfo = this.getSelectionOrContainingMark(editor);
+    if (!selectionInfo)
+      return;
+    const sourceText = this.getSourceText(editor);
+    const edit = sourceText ? removeColorFromSelection(sourceText, selectionInfo, kind) : {
+      from: selectionInfo.from,
+      to: selectionInfo.to,
+      insert: removeColorFromSelection(
+        selectionInfo.text,
+        { text: selectionInfo.text, from: 0, to: selectionInfo.text.length },
+        kind
+      ).insert
+    };
+    const editSelection = {
+      from: edit.from,
+      to: edit.to,
+      text: sourceText ? sourceText.slice(edit.from, edit.to) : selectionInfo.text
+    };
+    if (await this.replaceRange(editor, edit.insert, editSelection)) {
+      this.clearDomSelection();
     }
+    this.currentSelection = null;
+  }
+  getSelectionOrContainingMark(editor) {
+    var _a;
+    const selectionInfo = (_a = this.currentSelection) != null ? _a : getSelection(editor);
+    if (selectionInfo)
+      return selectionInfo;
+    const cmView = getCmView(editor);
+    return cmView ? findPluginMarkAtOffset(
+      cmView.state.doc.toString(),
+      cmView.state.selection.main.from
+    ) : null;
+  }
+  async removeHighlight(editor) {
+    const selectionInfo = this.getSelectionOrContainingMark(editor);
     if (!selectionInfo)
       return;
     const sourceText = this.getSourceText(editor);
@@ -682,5 +1227,22 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
       this.clearDomSelection();
     }
     this.currentSelection = null;
+  }
+  async updateSettings(patch) {
+    this.settings = normalizeSettings({ ...this.settings, ...patch });
+    await this.saveData(this.settings);
+    this.removePopover(true);
+  }
+  async loadSettings() {
+    this.settings = normalizeSettings(await this.loadData());
+  }
+  async showWelcomeOnce() {
+    if (this.settings.hasSeenWelcome)
+      return;
+    new import_obsidian2.Notice(
+      "Rainbow Highlight: select text to open the palette. Active colors can be removed with one click. / \u9009\u4E2D\u6587\u5B57\u5373\u53EF\u6253\u5F00\u8C03\u8272\u76D8\uFF0C\u70B9\u51FB\u5DF2\u9009\u989C\u8272\u53EF\u76F4\u63A5\u53D6\u6D88\u3002",
+      8e3
+    );
+    await this.updateSettings({ hasSeenWelcome: true });
   }
 };

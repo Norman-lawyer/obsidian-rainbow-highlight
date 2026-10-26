@@ -2,10 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getPaletteRemoveIcon,
+  getPaletteRemoveAction,
   hasUsableSelectionRect,
+  positionSelectionPopover,
   replaceExactSourceRange,
+  shouldQueueSelectionAfterPointerCancel,
   shouldQueueSelectionAfterPointerUp,
 } from "../selection-ui.ts";
+
+test("uses distinct icons for clearing all highlighting and text colour", () => {
+  assert.equal(getPaletteRemoveIcon("all"), "eraser");
+  assert.equal(getPaletteRemoveIcon("text"), "remove-formatting");
+});
+
+test("gives each palette row the correct persistent remove action", () => {
+  assert.equal(getPaletteRemoveAction("bg"), "all");
+  assert.equal(getPaletteRemoveAction("text"), "text");
+});
 
 test("does not re-queue selection when a palette control is clicked", () => {
   const paletteButton = {};
@@ -22,6 +36,11 @@ test("does not re-queue selection when a palette control is clicked", () => {
   );
   assert.equal(shouldQueueSelectionAfterPointerUp(popover, note), true);
   assert.equal(shouldQueueSelectionAfterPointerUp(null, note), true);
+});
+
+test("re-checks the final selection when a pointer gesture is cancelled", () => {
+  assert.equal(shouldQueueSelectionAfterPointerCancel(true), true);
+  assert.equal(shouldQueueSelectionAfterPointerCancel(false), false);
 });
 
 test("rejects stale zero-sized selection rectangles", () => {
@@ -47,5 +66,16 @@ test("replaces the exact source range used by a reading-view selection", () => {
   assert.equal(
     replaceExactSourceRange(source, { text: "stale", from, to: from + text.length }, "hello"),
     null
+  );
+});
+
+test("keeps the palette inside a short viewport", () => {
+  assert.deepEqual(
+    positionSelectionPopover(
+      { top: 20, right: 180, bottom: 190, left: 20, width: 160, height: 170 },
+      { width: 220, height: 96 },
+      { width: 320, height: 240 }
+    ),
+    { top: 136, left: 8 }
   );
 });
