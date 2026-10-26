@@ -6,6 +6,7 @@ import {
   expandToPluginMark,
   findClosestSelection,
   findPluginMarkAtOffset,
+  removeHighlightFromSelection,
   removeHighlightsFromText,
   wrapWithMark,
 } from "../highlight-utils.ts";
@@ -144,6 +145,83 @@ test("expands a rendered partial selection ending at a highlight boundary", () =
     from: 0,
     to: documentText.length,
   });
+});
+
+test("removes highlighting only from the selected middle segment", () => {
+  const documentText = '<mark class="hl-yellow">abcdef</mark>';
+  const from = documentText.indexOf("cd");
+
+  assert.deepEqual(
+    removeHighlightFromSelection(documentText, {
+      text: "cd",
+      from,
+      to: from + 2,
+    }),
+    {
+      from: 0,
+      to: documentText.length,
+      insert:
+        '<mark class="hl-yellow">ab</mark>cd<mark class="hl-yellow">ef</mark>',
+    }
+  );
+});
+
+test("does not leave empty wrappers when removing an edge segment", () => {
+  const documentText = '<mark class="hl-yellow hlt-blue">abcdef</mark>';
+  const start = documentText.indexOf("abcdef");
+
+  assert.equal(
+    removeHighlightFromSelection(documentText, {
+      text: "ab",
+      from: start,
+      to: start + 2,
+    }).insert,
+    'ab<mark class="hl-yellow hlt-blue">cdef</mark>'
+  );
+  assert.equal(
+    removeHighlightFromSelection(documentText, {
+      text: "ef",
+      from: start + 4,
+      to: start + 6,
+    }).insert,
+    '<mark class="hl-yellow hlt-blue">abcd</mark>ef'
+  );
+});
+
+test("handles rendered edge selections whose source range includes a hidden tag", () => {
+  const documentText = '<mark class="hl-yellow">abcdef</mark>';
+  const innerFrom = documentText.indexOf("abcdef");
+  const innerTo = innerFrom + 6;
+
+  assert.equal(
+    removeHighlightFromSelection(documentText, {
+      text: documentText.slice(0, innerFrom + 2),
+      from: 0,
+      to: innerFrom + 2,
+    }).insert,
+    'ab<mark class="hl-yellow">cdef</mark>'
+  );
+  assert.equal(
+    removeHighlightFromSelection(documentText, {
+      text: documentText.slice(innerTo - 2),
+      from: innerTo - 2,
+      to: documentText.length,
+    }).insert,
+    '<mark class="hl-yellow">abcd</mark>ef'
+  );
+});
+
+test("removes the whole highlight when the full wrapper is targeted", () => {
+  const documentText = '<mark class="hl-yellow">abcdef</mark>';
+
+  assert.deepEqual(
+    removeHighlightFromSelection(documentText, {
+      text: documentText,
+      from: 0,
+      to: documentText.length,
+    }),
+    { from: 0, to: documentText.length, insert: "abcdef" }
+  );
 });
 
 test("preserves task lists, headings, and callout lists", () => {

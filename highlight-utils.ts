@@ -6,6 +6,12 @@ export interface SelectionInfo {
   to: number;
 }
 
+export interface TextEdit {
+  from: number;
+  to: number;
+  insert: string;
+}
+
 const PLUGIN_CLASS = /^(?:hl|hlt)-[\w-]+$/;
 
 interface PluginMark extends SelectionInfo {
@@ -194,8 +200,8 @@ export function findPluginMarkAtOffset(
   return mark ? { text: mark.text, from: mark.from, to: mark.to } : null;
 }
 
-/** Include the containing source wrapper so partial recolouring or removal
- * affects one complete highlight instead of producing nested tags. */
+/** Include the containing source wrapper so partial recolouring affects one
+ * complete highlight instead of producing nested tags. */
 export function expandToPluginMark(
   documentText: string,
   selection: SelectionInfo
@@ -306,4 +312,52 @@ export function removeHighlightsFromText(text: string): string {
     cursor = hidden.to;
   }
   return result + text.slice(cursor);
+}
+
+/** Remove plugin styling only from the selected source characters. If the
+ * selection overlaps one highlight, preserve wrappers around both unselected
+ * sides. A full-wrapper selection is completely unwrapped. */
+export function removeHighlightFromSelection(
+  documentText: string,
+  selection: SelectionInfo
+): TextEdit {
+  const containingMark = parsePluginMarks(documentText)
+    .filter(
+      (mark) =>
+        selection.from >= mark.from &&
+        selection.to <= mark.to &&
+        selection.to >= mark.innerFrom &&
+        selection.from <= mark.innerTo
+    )
+    .sort((a, b) => (a.to - a.from) - (b.to - b.from))[0];
+
+  if (!containingMark) {
+    return {
+      from: selection.from,
+      to: selection.to,
+      insert: removeHighlightsFromText(selection.text),
+    };
+  }
+
+  const openingTag = documentText.slice(
+    containingMark.from,
+    containingMark.innerFrom
+  );
+  const closingTag = documentText.slice(
+    containingMark.innerTo,
+    containingMark.to
+  );
+  const selectedFrom = Math.max(selection.from, containingMark.innerFrom);
+  const selectedTo = Math.min(selection.to, containingMark.innerTo);
+  const before = documentText.slice(containingMark.innerFrom, selectedFrom);
+  const selected = documentText.slice(selectedFrom, selectedTo);
+  const after = documentText.slice(selectedTo, containingMark.innerTo);
+  const wrap = (text: string) => text ? openingTag + text + closingTag : "";
+
+  return {
+    from: containingMark.from,
+    to: containingMark.to,
+    insert:
+      wrap(before) + removeHighlightsFromText(selected) + wrap(after),
+  };
 }

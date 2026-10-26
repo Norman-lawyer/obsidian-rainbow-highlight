@@ -238,6 +238,37 @@ function removeHighlightsFromText(text) {
   }
   return result + text.slice(cursor);
 }
+function removeHighlightFromSelection(documentText, selection) {
+  const containingMark = parsePluginMarks(documentText).filter(
+    (mark) => selection.from >= mark.from && selection.to <= mark.to && selection.to >= mark.innerFrom && selection.from <= mark.innerTo
+  ).sort((a, b) => a.to - a.from - (b.to - b.from))[0];
+  if (!containingMark) {
+    return {
+      from: selection.from,
+      to: selection.to,
+      insert: removeHighlightsFromText(selection.text)
+    };
+  }
+  const openingTag = documentText.slice(
+    containingMark.from,
+    containingMark.innerFrom
+  );
+  const closingTag = documentText.slice(
+    containingMark.innerTo,
+    containingMark.to
+  );
+  const selectedFrom = Math.max(selection.from, containingMark.innerFrom);
+  const selectedTo = Math.min(selection.to, containingMark.innerTo);
+  const before = documentText.slice(containingMark.innerFrom, selectedFrom);
+  const selected = documentText.slice(selectedFrom, selectedTo);
+  const after = documentText.slice(selectedTo, containingMark.innerTo);
+  const wrap = (text) => text ? openingTag + text + closingTag : "";
+  return {
+    from: containingMark.from,
+    to: containingMark.to,
+    insert: wrap(before) + removeHighlightsFromText(selected) + wrap(after)
+  };
+}
 
 // selection-ui.ts
 function shouldQueueSelectionAfterPointerUp(popover, target) {
@@ -604,11 +635,17 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     if (!selectionInfo)
       return;
     const sourceText = this.getSourceText(editor);
-    if (sourceText) {
-      selectionInfo = expandToPluginMark(sourceText, selectionInfo);
-    }
-    const cleaned = removeHighlightsFromText(selectionInfo.text);
-    if (await this.replaceRange(editor, cleaned, selectionInfo)) {
+    const edit = sourceText ? removeHighlightFromSelection(sourceText, selectionInfo) : {
+      from: selectionInfo.from,
+      to: selectionInfo.to,
+      insert: removeHighlightsFromText(selectionInfo.text)
+    };
+    const editSelection = {
+      from: edit.from,
+      to: edit.to,
+      text: sourceText ? sourceText.slice(edit.from, edit.to) : selectionInfo.text
+    };
+    if (await this.replaceRange(editor, edit.insert, editSelection)) {
       this.clearDomSelection();
     }
     this.currentSelection = null;

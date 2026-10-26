@@ -5,6 +5,7 @@ import {
   findClosestSelection,
   findPluginMarkAtOffset,
   HighlightKind,
+  removeHighlightFromSelection,
   removeHighlightsFromText,
   SelectionInfo,
 } from "./highlight-utils";
@@ -433,11 +434,21 @@ export default class RainbowHighlightPlugin extends Plugin {
     if (!selectionInfo) return;
 
     const sourceText = this.getSourceText(editor);
-    if (sourceText) {
-      selectionInfo = expandToPluginMark(sourceText, selectionInfo);
-    }
-    const cleaned = removeHighlightsFromText(selectionInfo.text);
-    if (await this.replaceRange(editor, cleaned, selectionInfo)) {
+    const edit = sourceText
+      ? removeHighlightFromSelection(sourceText, selectionInfo)
+      : {
+          from: selectionInfo.from,
+          to: selectionInfo.to,
+          insert: removeHighlightsFromText(selectionInfo.text),
+        };
+    const editSelection = {
+      from: edit.from,
+      to: edit.to,
+      text: sourceText
+        ? sourceText.slice(edit.from, edit.to)
+        : selectionInfo.text,
+    };
+    if (await this.replaceRange(editor, edit.insert, editSelection)) {
       this.clearDomSelection();
     }
     this.currentSelection = null;
