@@ -1,4 +1,4 @@
-import { Editor, MarkdownView, Plugin, setIcon } from "obsidian";
+import { Editor, MarkdownView, Notice, Plugin, setIcon } from "obsidian";
 import {
   applyColorToText,
   expandToPluginMark,
@@ -8,6 +8,11 @@ import {
   removeHighlightsFromText,
   SelectionInfo,
 } from "./highlight-utils";
+import {
+  hasUsableSelectionRect,
+  replaceExactSourceRange,
+  shouldQueueSelectionAfterPointerUp,
+} from "./selection-ui";
 
 interface HighlightColor {
   name: string;
@@ -44,7 +49,50 @@ function getCmView(editor: Editor): CmEditorView | null {
   return (editor as EditorWithCm).cm ?? null;
 }
 
-function getSelection(editor: Editor): SelectionInfo | null {
+function getDomSelection(
+  editor: Editor,
+  sourceText?: string
+): SelectionInfo | null {
+  const cmView = getCmView(editor);
+  if (!cmView) return null;
+  const domSelection = window.getSelection();
+  if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
+    return null;
+  }
+  const domText = domSelection.toString();
+  if (!domText || !domText.trim()) return null;
+
+  const editorSelection = cmView.state.selection.main;
+  let hintFrom = editorSelection.from;
+  let hintTo = editorSelection.to;
+  const range = domSelection.getRangeAt(0);
+  if (cmView.posAtDOM) {
+    try {
+      hintFrom = cmView.posAtDOM(range.startContainer, range.startOffset);
+      hintTo = cmView.posAtDOM(range.endContainer, range.endOffset);
+    } catch {
+      // Reading-view nodes and some rendered widgets are outside CodeMirror.
+    }
+  }
+
+  return findClosestSelection(
+    sourceText ?? cmView.state.doc.toString(),
+    domText,
+    hintFrom,
+    hintTo
+  );
+}
+
+function getSelection(
+  editor: Editor,
+  preferDomSelection = false,
+  sourceText?: string
+): SelectionInfo | null {
+  if (preferDomSelection) {
+    const domSelection = getDomSelection(editor, sourceText);
+    if (domSelection) return domSelection;
+  }
+
   const text = editor.getSelection();
   if (text && text.trim().length > 0) {
     const cmView = getCmView(editor);
@@ -69,35 +117,7 @@ function getSelection(editor: Editor): SelectionInfo | null {
 
   // Rendered widgets such as callouts expose a DOM selection but not always a
   // CodeMirror selection. Use the nearest source occurrence, not the first one.
-  const domSelection = window.getSelection();
-  if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
-    return null;
-  }
-  const domText = domSelection.toString();
-  if (!domText || !domText.trim()) return null;
-
-  let hintFrom = selection.from;
-  let hintTo = selection.to;
-  const range = domSelection.getRangeAt(0);
-  if (cmView.posAtDOM) {
-    try {
-      hintFrom = cmView.posAtDOM(range.startContainer, range.startOffset);
-      hintTo = cmView.posAtDOM(range.endContainer, range.endOffset);
-    } catch {
-      // Some rendered widgets cannot map their DOM nodes back to CodeMirror.
-    }
-  }
-
-  return findClosestSelection(cmView.state.doc.toString(), domText, hintFrom, hintTo);
-}
-
-function replaceRange(editor: Editor, replacement: string, from: number, to: number) {
-  const cmView = getCmView(editor);
-  if (cmView) {
-    cmView.dispatch({ changes: { from, to, insert: replacement } });
-  } else {
-    editor.replaceSelection(replacement);
-  }
+  return getDomSelection(editor);
 }
 
 export default class RainbowHighlightPlugin extends Plugin {
@@ -112,9 +132,16 @@ export default class RainbowHighlightPlugin extends Plugin {
       this.pointerIsDown = true;
     });
 
-    this.registerDomEvent(document, "pointerup", () => {
+    this.registerDomEvent(document, "pointerup", (event: PointerEvent) => {
       this.pointerIsDown = false;
-      this.queueSelection(30);
+      if (
+        shouldQueueSelectionAfterPointerUp(
+          this.popover,
+          event.target as Node | null
+        )
+      ) {
+        this.queueSelection(30);
+      }
     });
 
     this.registerDomEvent(document, "pointercancel", () => {
@@ -187,7 +214,12 @@ export default class RainbowHighlightPlugin extends Plugin {
     }
 
     const editor = activeView.editor;
-    const selectionInfo = getSelection(editor);
+    const isPreview = activeView.getMode() === "preview";
+    const selectionInfo = getSelection(
+      editor,
+      isPreview,
+      isPreview ? activeView.getViewData() : undefined
+    );
     if (!selectionInfo || !domSelection || domSelection.rangeCount === 0) {
       this.removePopover(true);
       return;
@@ -195,6 +227,10 @@ export default class RainbowHighlightPlugin extends Plugin {
 
     this.currentSelection = selectionInfo;
     const rect = domSelection.getRangeAt(0).getBoundingClientRect();
+    if (!hasUsableSelectionRect(rect)) {
+      this.removePopover(true);
+      return;
+    }
     this.showPopover(rect, editor);
   }
 
@@ -203,6 +239,11 @@ export default class RainbowHighlightPlugin extends Plugin {
 
     const popover = document.createElement("div");
     popover.addClass("hl-popover");
+    popover.addEventListener("mousedown", (event) => {
+      // Keep the note selection alive until the palette action uses it.
+      event.preventDefault();
+      event.stopPropagation();
+    });
     const container = document.createElement("div");
     container.addClass("hl-popover-colors");
 
@@ -256,9 +297,10 @@ export default class RainbowHighlightPlugin extends Plugin {
       circle.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        this.ignoreSelectionUntil = Date.now() + 250;
-        this.applyColor(editor, color, kind);
-        this.removePopover(true);
+        this.suppressSelectionHandling();
+        void this.applyColor(editor, color, kind).finally(() => {
+          this.removePopover(true);
+        });
       });
       row.appendChild(circle);
     });
@@ -275,9 +317,10 @@ export default class RainbowHighlightPlugin extends Plugin {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.ignoreSelectionUntil = Date.now() + 250;
-      this.removeHighlight(editor);
-      this.removePopover(true);
+      this.suppressSelectionHandling();
+      void this.removeHighlight(editor).finally(() => {
+        this.removePopover(true);
+      });
     });
     return button;
   }
@@ -285,26 +328,100 @@ export default class RainbowHighlightPlugin extends Plugin {
   private removePopover(clearSelection: boolean) {
     this.popover?.remove();
     this.popover = null;
-    if (clearSelection) this.currentSelection = null;
+    if (clearSelection) {
+      this.currentSelection = null;
+      if (this.selectionTimer !== null) {
+        window.clearTimeout(this.selectionTimer);
+        this.selectionTimer = null;
+      }
+    }
   }
 
-  private applyColor(editor: Editor, color: HighlightColor, kind: HighlightKind) {
-    let selectionInfo = this.currentSelection ?? getSelection(editor);
-    if (!selectionInfo) return;
+  private suppressSelectionHandling() {
+    this.ignoreSelectionUntil = Date.now() + 350;
+    if (this.selectionTimer !== null) {
+      window.clearTimeout(this.selectionTimer);
+      this.selectionTimer = null;
+    }
+  }
+
+  private clearDomSelection() {
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) selection.removeAllRanges();
+  }
+
+  private getSourceText(editor: Editor): string | null {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (activeView?.getMode() === "preview") return activeView.getViewData();
+    return getCmView(editor)?.state.doc.toString() ?? null;
+  }
+
+  private async replaceRange(
+    editor: Editor,
+    replacement: string,
+    selectionInfo: SelectionInfo
+  ): Promise<boolean> {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (activeView?.getMode() === "preview" && activeView.file) {
+      try {
+        await this.app.vault.process(activeView.file, (source) => {
+          const updated = replaceExactSourceRange(
+            source,
+            selectionInfo,
+            replacement
+          );
+          if (updated === null) throw new Error("The note changed after selection");
+          return updated;
+        });
+        return true;
+      } catch {
+        new Notice("Rainbow Highlight: selection changed; please select the text again.");
+        return false;
+      }
+    }
 
     const cmView = getCmView(editor);
     if (cmView) {
-      selectionInfo = expandToPluginMark(cmView.state.doc.toString(), selectionInfo);
+      cmView.dispatch({
+        changes: {
+          from: selectionInfo.from,
+          to: selectionInfo.to,
+          insert: replacement,
+        },
+      });
+    } else {
+      editor.replaceRange(
+        replacement,
+        editor.offsetToPos(selectionInfo.from),
+        editor.offsetToPos(selectionInfo.to)
+      );
+    }
+    return true;
+  }
+
+  private async applyColor(
+    editor: Editor,
+    color: HighlightColor,
+    kind: HighlightKind
+  ) {
+    let selectionInfo = this.currentSelection ?? getSelection(editor);
+    if (!selectionInfo) return;
+
+    const sourceText = this.getSourceText(editor);
+    if (sourceText) {
+      selectionInfo = expandToPluginMark(sourceText, selectionInfo);
     }
     const newClass = kind === "bg"
       ? color.class
       : color.class.replace(/^hl-/, "hlt-");
     const highlighted = applyColorToText(selectionInfo.text, newClass, kind);
-    replaceRange(editor, highlighted, selectionInfo.from, selectionInfo.to);
+    if (await this.replaceRange(editor, highlighted, selectionInfo)) {
+      this.clearDomSelection();
+    }
     this.currentSelection = null;
   }
 
-  private removeHighlight(editor: Editor) {
+  private async removeHighlight(editor: Editor) {
     let selectionInfo = this.currentSelection ?? getSelection(editor);
     const cmView = getCmView(editor);
     if (!selectionInfo && cmView) {
@@ -315,11 +432,14 @@ export default class RainbowHighlightPlugin extends Plugin {
     }
     if (!selectionInfo) return;
 
-    if (cmView) {
-      selectionInfo = expandToPluginMark(cmView.state.doc.toString(), selectionInfo);
+    const sourceText = this.getSourceText(editor);
+    if (sourceText) {
+      selectionInfo = expandToPluginMark(sourceText, selectionInfo);
     }
     const cleaned = removeHighlightsFromText(selectionInfo.text);
-    replaceRange(editor, cleaned, selectionInfo.from, selectionInfo.to);
+    if (await this.replaceRange(editor, cleaned, selectionInfo)) {
+      this.clearDomSelection();
+    }
     this.currentSelection = null;
   }
 }

@@ -239,6 +239,20 @@ function removeHighlightsFromText(text) {
   return result + text.slice(cursor);
 }
 
+// selection-ui.ts
+function shouldQueueSelectionAfterPointerUp(popover, target) {
+  return !popover || !popover.contains(target);
+}
+function hasUsableSelectionRect(rect) {
+  return [rect.top, rect.right, rect.bottom, rect.left, rect.width, rect.height].every(Number.isFinite) && (rect.width > 0 || rect.height > 0);
+}
+function replaceExactSourceRange(source, selection, replacement) {
+  if (selection.from < 0 || selection.to < selection.from || selection.to > source.length || source.slice(selection.from, selection.to) !== selection.text) {
+    return null;
+  }
+  return source.slice(0, selection.from) + replacement + source.slice(selection.to);
+}
+
 // main.ts
 var HIGHLIGHT_COLORS = [
   { name: "Red", class: "hl-red", color: "#991b1b", bg: "#ef4444" },
@@ -253,7 +267,41 @@ function getCmView(editor) {
   var _a;
   return (_a = editor.cm) != null ? _a : null;
 }
-function getSelection(editor) {
+function getDomSelection(editor, sourceText) {
+  const cmView = getCmView(editor);
+  if (!cmView)
+    return null;
+  const domSelection = window.getSelection();
+  if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
+    return null;
+  }
+  const domText = domSelection.toString();
+  if (!domText || !domText.trim())
+    return null;
+  const editorSelection = cmView.state.selection.main;
+  let hintFrom = editorSelection.from;
+  let hintTo = editorSelection.to;
+  const range = domSelection.getRangeAt(0);
+  if (cmView.posAtDOM) {
+    try {
+      hintFrom = cmView.posAtDOM(range.startContainer, range.startOffset);
+      hintTo = cmView.posAtDOM(range.endContainer, range.endOffset);
+    } catch (e) {
+    }
+  }
+  return findClosestSelection(
+    sourceText != null ? sourceText : cmView.state.doc.toString(),
+    domText,
+    hintFrom,
+    hintTo
+  );
+}
+function getSelection(editor, preferDomSelection = false, sourceText) {
+  if (preferDomSelection) {
+    const domSelection = getDomSelection(editor, sourceText);
+    if (domSelection)
+      return domSelection;
+  }
   const text = editor.getSelection();
   if (text && text.trim().length > 0) {
     const cmView2 = getCmView(editor);
@@ -275,32 +323,7 @@ function getSelection(editor) {
       return { text: cmText, from: selection.from, to: selection.to };
     }
   }
-  const domSelection = window.getSelection();
-  if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
-    return null;
-  }
-  const domText = domSelection.toString();
-  if (!domText || !domText.trim())
-    return null;
-  let hintFrom = selection.from;
-  let hintTo = selection.to;
-  const range = domSelection.getRangeAt(0);
-  if (cmView.posAtDOM) {
-    try {
-      hintFrom = cmView.posAtDOM(range.startContainer, range.startOffset);
-      hintTo = cmView.posAtDOM(range.endContainer, range.endOffset);
-    } catch (e) {
-    }
-  }
-  return findClosestSelection(cmView.state.doc.toString(), domText, hintFrom, hintTo);
-}
-function replaceRange(editor, replacement, from, to) {
-  const cmView = getCmView(editor);
-  if (cmView) {
-    cmView.dispatch({ changes: { from, to, insert: replacement } });
-  } else {
-    editor.replaceSelection(replacement);
-  }
+  return getDomSelection(editor);
 }
 var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
   constructor() {
@@ -315,9 +338,14 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     this.registerDomEvent(document, "pointerdown", () => {
       this.pointerIsDown = true;
     });
-    this.registerDomEvent(document, "pointerup", () => {
+    this.registerDomEvent(document, "pointerup", (event) => {
       this.pointerIsDown = false;
-      this.queueSelection(30);
+      if (shouldQueueSelectionAfterPointerUp(
+        this.popover,
+        event.target
+      )) {
+        this.queueSelection(30);
+      }
     });
     this.registerDomEvent(document, "pointercancel", () => {
       this.pointerIsDown = false;
@@ -383,19 +411,32 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
       return;
     }
     const editor = activeView.editor;
-    const selectionInfo = getSelection(editor);
+    const isPreview = activeView.getMode() === "preview";
+    const selectionInfo = getSelection(
+      editor,
+      isPreview,
+      isPreview ? activeView.getViewData() : void 0
+    );
     if (!selectionInfo || !domSelection || domSelection.rangeCount === 0) {
       this.removePopover(true);
       return;
     }
     this.currentSelection = selectionInfo;
     const rect = domSelection.getRangeAt(0).getBoundingClientRect();
+    if (!hasUsableSelectionRect(rect)) {
+      this.removePopover(true);
+      return;
+    }
     this.showPopover(rect, editor);
   }
   showPopover(rect, editor) {
     this.removePopover(false);
     const popover = document.createElement("div");
     popover.addClass("hl-popover");
+    popover.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
     const container = document.createElement("div");
     container.addClass("hl-popover-colors");
     const backgroundRow = this.buildRow(editor, "bg", "Background");
@@ -440,9 +481,10 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
       circle.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        this.ignoreSelectionUntil = Date.now() + 250;
-        this.applyColor(editor, color, kind);
-        this.removePopover(true);
+        this.suppressSelectionHandling();
+        void this.applyColor(editor, color, kind).finally(() => {
+          this.removePopover(true);
+        });
       });
       row.appendChild(circle);
     });
@@ -457,9 +499,10 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.ignoreSelectionUntil = Date.now() + 250;
-      this.removeHighlight(editor);
-      this.removePopover(true);
+      this.suppressSelectionHandling();
+      void this.removeHighlight(editor).finally(() => {
+        this.removePopover(true);
+      });
     });
     return button;
   }
@@ -467,24 +510,88 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     var _a;
     (_a = this.popover) == null ? void 0 : _a.remove();
     this.popover = null;
-    if (clearSelection)
+    if (clearSelection) {
       this.currentSelection = null;
+      if (this.selectionTimer !== null) {
+        window.clearTimeout(this.selectionTimer);
+        this.selectionTimer = null;
+      }
+    }
   }
-  applyColor(editor, color, kind) {
+  suppressSelectionHandling() {
+    this.ignoreSelectionUntil = Date.now() + 350;
+    if (this.selectionTimer !== null) {
+      window.clearTimeout(this.selectionTimer);
+      this.selectionTimer = null;
+    }
+  }
+  clearDomSelection() {
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed)
+      selection.removeAllRanges();
+  }
+  getSourceText(editor) {
+    var _a, _b;
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    if ((activeView == null ? void 0 : activeView.getMode()) === "preview")
+      return activeView.getViewData();
+    return (_b = (_a = getCmView(editor)) == null ? void 0 : _a.state.doc.toString()) != null ? _b : null;
+  }
+  async replaceRange(editor, replacement, selectionInfo) {
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
+    if ((activeView == null ? void 0 : activeView.getMode()) === "preview" && activeView.file) {
+      try {
+        await this.app.vault.process(activeView.file, (source) => {
+          const updated = replaceExactSourceRange(
+            source,
+            selectionInfo,
+            replacement
+          );
+          if (updated === null)
+            throw new Error("The note changed after selection");
+          return updated;
+        });
+        return true;
+      } catch (e) {
+        new import_obsidian.Notice("Rainbow Highlight: selection changed; please select the text again.");
+        return false;
+      }
+    }
+    const cmView = getCmView(editor);
+    if (cmView) {
+      cmView.dispatch({
+        changes: {
+          from: selectionInfo.from,
+          to: selectionInfo.to,
+          insert: replacement
+        }
+      });
+    } else {
+      editor.replaceRange(
+        replacement,
+        editor.offsetToPos(selectionInfo.from),
+        editor.offsetToPos(selectionInfo.to)
+      );
+    }
+    return true;
+  }
+  async applyColor(editor, color, kind) {
     var _a;
     let selectionInfo = (_a = this.currentSelection) != null ? _a : getSelection(editor);
     if (!selectionInfo)
       return;
-    const cmView = getCmView(editor);
-    if (cmView) {
-      selectionInfo = expandToPluginMark(cmView.state.doc.toString(), selectionInfo);
+    const sourceText = this.getSourceText(editor);
+    if (sourceText) {
+      selectionInfo = expandToPluginMark(sourceText, selectionInfo);
     }
     const newClass = kind === "bg" ? color.class : color.class.replace(/^hl-/, "hlt-");
     const highlighted = applyColorToText(selectionInfo.text, newClass, kind);
-    replaceRange(editor, highlighted, selectionInfo.from, selectionInfo.to);
+    if (await this.replaceRange(editor, highlighted, selectionInfo)) {
+      this.clearDomSelection();
+    }
     this.currentSelection = null;
   }
-  removeHighlight(editor) {
+  async removeHighlight(editor) {
     var _a;
     let selectionInfo = (_a = this.currentSelection) != null ? _a : getSelection(editor);
     const cmView = getCmView(editor);
@@ -496,11 +603,14 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     }
     if (!selectionInfo)
       return;
-    if (cmView) {
-      selectionInfo = expandToPluginMark(cmView.state.doc.toString(), selectionInfo);
+    const sourceText = this.getSourceText(editor);
+    if (sourceText) {
+      selectionInfo = expandToPluginMark(sourceText, selectionInfo);
     }
     const cleaned = removeHighlightsFromText(selectionInfo.text);
-    replaceRange(editor, cleaned, selectionInfo.from, selectionInfo.to);
+    if (await this.replaceRange(editor, cleaned, selectionInfo)) {
+      this.clearDomSelection();
+    }
     this.currentSelection = null;
   }
 };
