@@ -152,11 +152,6 @@ function findPluginMarkAtOffset(documentText, offset) {
   const mark = candidates[0];
   return mark ? { text: mark.text, from: mark.from, to: mark.to } : null;
 }
-function expandToPluginMark(documentText, selection) {
-  const candidates = parsePluginMarks(documentText).filter((mark2) => selection.from >= mark2.innerFrom && selection.to <= mark2.innerTo).sort((a, b) => a.to - a.from - (b.to - b.from));
-  const mark = candidates[0];
-  return mark ? { text: mark.text, from: mark.from, to: mark.to } : selection;
-}
 function wrapInline(text, colorClass) {
   const wrappers = ["***", "___", "**", "__", "~~", "*", "_"];
   for (const wrapper of wrappers) {
@@ -223,6 +218,38 @@ function applyColorToText(text, newClass, kind) {
     return `<mark class="${classes.join(" ")}">${removeHighlightsFromText(whole[2])}</mark>`;
   }
   return wrapWithMark(removeHighlightsFromText(text), newClass);
+}
+function applyColorToSelection(documentText, selection, newClass, kind) {
+  const containingMark = parsePluginMarks(documentText).filter(
+    (mark) => selection.from >= mark.from && selection.to <= mark.to && selection.to >= mark.innerFrom && selection.from <= mark.innerTo
+  ).sort((a, b) => a.to - a.from - (b.to - b.from))[0];
+  if (!containingMark) {
+    return {
+      from: selection.from,
+      to: selection.to,
+      insert: applyColorToText(selection.text, newClass, kind)
+    };
+  }
+  const openingTag = documentText.slice(
+    containingMark.from,
+    containingMark.innerFrom
+  );
+  const closingTag = documentText.slice(
+    containingMark.innerTo,
+    containingMark.to
+  );
+  const selectedFrom = Math.max(selection.from, containingMark.innerFrom);
+  const selectedTo = Math.min(selection.to, containingMark.innerTo);
+  const before = documentText.slice(containingMark.innerFrom, selectedFrom);
+  const selected = documentText.slice(selectedFrom, selectedTo);
+  const after = documentText.slice(selectedTo, containingMark.innerTo);
+  const wrapOriginal = (text) => text ? openingTag + text + closingTag : "";
+  const recoloured = selected ? applyColorToText(openingTag + selected + closingTag, newClass, kind) : "";
+  return {
+    from: containingMark.from,
+    to: containingMark.to,
+    insert: wrapOriginal(before) + recoloured + wrapOriginal(after)
+  };
 }
 function removeHighlightsFromText(text) {
   const hiddenRanges = pluginTagRanges(text);
@@ -612,12 +639,18 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     if (!selectionInfo)
       return;
     const sourceText = this.getSourceText(editor);
-    if (sourceText) {
-      selectionInfo = expandToPluginMark(sourceText, selectionInfo);
-    }
     const newClass = kind === "bg" ? color.class : color.class.replace(/^hl-/, "hlt-");
-    const highlighted = applyColorToText(selectionInfo.text, newClass, kind);
-    if (await this.replaceRange(editor, highlighted, selectionInfo)) {
+    const edit = sourceText ? applyColorToSelection(sourceText, selectionInfo, newClass, kind) : {
+      from: selectionInfo.from,
+      to: selectionInfo.to,
+      insert: applyColorToText(selectionInfo.text, newClass, kind)
+    };
+    const editSelection = {
+      from: edit.from,
+      to: edit.to,
+      text: sourceText ? sourceText.slice(edit.from, edit.to) : selectionInfo.text
+    };
+    if (await this.replaceRange(editor, edit.insert, editSelection)) {
       this.clearDomSelection();
     }
     this.currentSelection = null;

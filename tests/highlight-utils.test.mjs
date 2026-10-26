@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyColorToSelection,
   applyColorToText,
   expandToPluginMark,
   findClosestSelection,
@@ -53,6 +54,66 @@ test("changes one colour kind without losing the other", () => {
       "bg"
     ),
     '<mark class="hlt-blue hl-green">hello</mark>'
+  );
+});
+
+test("recolours an entire existing highlight", () => {
+  const documentText = '<mark class="hl-red">hello</mark>';
+
+  assert.deepEqual(
+    applyColorToSelection(
+      documentText,
+      { text: documentText, from: 0, to: documentText.length },
+      "hl-blue",
+      "bg"
+    ),
+    {
+      from: 0,
+      to: documentText.length,
+      insert: '<mark class="hl-blue">hello</mark>',
+    }
+  );
+});
+
+test("recolours only the selected part of an existing highlight", () => {
+  const documentText = '<mark class="hl-red">abcdef</mark>';
+  const from = documentText.indexOf("cd");
+
+  assert.deepEqual(
+    applyColorToSelection(
+      documentText,
+      { text: "cd", from, to: from + 2 },
+      "hl-blue",
+      "bg"
+    ),
+    {
+      from: 0,
+      to: documentText.length,
+      insert:
+        '<mark class="hl-red">ab</mark>' +
+        '<mark class="hl-blue">cd</mark>' +
+        '<mark class="hl-red">ef</mark>',
+    }
+  );
+});
+
+test("preserves text colour while recolouring selected background", () => {
+  const documentText = '<mark class="hl-red hlt-yellow">abcdef</mark>';
+  const innerFrom = documentText.indexOf("abcdef");
+
+  assert.equal(
+    applyColorToSelection(
+      documentText,
+      {
+        text: documentText.slice(0, innerFrom + 2),
+        from: 0,
+        to: innerFrom + 2,
+      },
+      "hl-blue",
+      "bg"
+    ).insert,
+    '<mark class="hlt-yellow hl-blue">ab</mark>' +
+      '<mark class="hl-red hlt-yellow">cdef</mark>'
   );
 });
 

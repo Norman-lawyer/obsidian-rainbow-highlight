@@ -1,7 +1,7 @@
 import { Editor, MarkdownView, Notice, Plugin, setIcon } from "obsidian";
 import {
+  applyColorToSelection,
   applyColorToText,
-  expandToPluginMark,
   findClosestSelection,
   findPluginMarkAtOffset,
   HighlightKind,
@@ -409,14 +409,24 @@ export default class RainbowHighlightPlugin extends Plugin {
     if (!selectionInfo) return;
 
     const sourceText = this.getSourceText(editor);
-    if (sourceText) {
-      selectionInfo = expandToPluginMark(sourceText, selectionInfo);
-    }
     const newClass = kind === "bg"
       ? color.class
       : color.class.replace(/^hl-/, "hlt-");
-    const highlighted = applyColorToText(selectionInfo.text, newClass, kind);
-    if (await this.replaceRange(editor, highlighted, selectionInfo)) {
+    const edit = sourceText
+      ? applyColorToSelection(sourceText, selectionInfo, newClass, kind)
+      : {
+          from: selectionInfo.from,
+          to: selectionInfo.to,
+          insert: applyColorToText(selectionInfo.text, newClass, kind),
+        };
+    const editSelection = {
+      from: edit.from,
+      to: edit.to,
+      text: sourceText
+        ? sourceText.slice(edit.from, edit.to)
+        : selectionInfo.text,
+    };
+    if (await this.replaceRange(editor, edit.insert, editSelection)) {
       this.clearDomSelection();
     }
     this.currentSelection = null;

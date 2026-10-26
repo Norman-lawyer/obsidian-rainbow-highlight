@@ -300,6 +300,59 @@ export function applyColorToText(
   return wrapWithMark(removeHighlightsFromText(text), newClass);
 }
 
+/** Recolour only the selected source characters. Existing highlight wrappers
+ * remain around the unselected sides, while the selected segment keeps the
+ * other colour kind (background or text) and replaces only the requested one. */
+export function applyColorToSelection(
+  documentText: string,
+  selection: SelectionInfo,
+  newClass: string,
+  kind: HighlightKind
+): TextEdit {
+  const containingMark = parsePluginMarks(documentText)
+    .filter(
+      (mark) =>
+        selection.from >= mark.from &&
+        selection.to <= mark.to &&
+        selection.to >= mark.innerFrom &&
+        selection.from <= mark.innerTo
+    )
+    .sort((a, b) => (a.to - a.from) - (b.to - b.from))[0];
+
+  if (!containingMark) {
+    return {
+      from: selection.from,
+      to: selection.to,
+      insert: applyColorToText(selection.text, newClass, kind),
+    };
+  }
+
+  const openingTag = documentText.slice(
+    containingMark.from,
+    containingMark.innerFrom
+  );
+  const closingTag = documentText.slice(
+    containingMark.innerTo,
+    containingMark.to
+  );
+  const selectedFrom = Math.max(selection.from, containingMark.innerFrom);
+  const selectedTo = Math.min(selection.to, containingMark.innerTo);
+  const before = documentText.slice(containingMark.innerFrom, selectedFrom);
+  const selected = documentText.slice(selectedFrom, selectedTo);
+  const after = documentText.slice(selectedTo, containingMark.innerTo);
+  const wrapOriginal = (text: string) =>
+    text ? openingTag + text + closingTag : "";
+  const recoloured = selected
+    ? applyColorToText(openingTag + selected + closingTag, newClass, kind)
+    : "";
+
+  return {
+    from: containingMark.from,
+    to: containingMark.to,
+    insert: wrapOriginal(before) + recoloured + wrapOriginal(after),
+  };
+}
+
 export function removeHighlightsFromText(text: string): string {
   const hiddenRanges = pluginTagRanges(text);
   if (hiddenRanges.length === 0) return text;
