@@ -7,7 +7,18 @@ export interface SelectionInfo {
 }
 
 const PLUGIN_CLASS = /^(?:hl|hlt)-[\w-]+$/;
-const MARK_PATTERN = /<mark\s+class="([^"]*)">([\s\S]*?)<\/mark>/g;
+
+interface PluginMark extends SelectionInfo {
+  classNames: string;
+  innerFrom: number;
+  innerTo: number;
+}
+
+interface HiddenRange {
+  from: number;
+  to: number;
+  kind: "open" | "close";
+}
 
 function calloutCandidates(text: string): string[] {
   const normalized = text.replace(/\r\n?/g, "\n");
@@ -25,6 +36,16 @@ function calloutCandidates(text: string): string[] {
   return [...new Set(candidates)];
 }
 
+function findOccurrences(text: string, candidate: string): number[] {
+  const occurrences: number[] = [];
+  let index = text.indexOf(candidate);
+  while (index >= 0) {
+    occurrences.push(index);
+    index = text.indexOf(candidate, index + 1);
+  }
+  return occurrences;
+}
+
 /** Locate the occurrence nearest the editor/DOM position instead of always
  * mutating the first identical sentence in the note. */
 export function findClosestSelection(
@@ -38,22 +59,37 @@ export function findClosestSelection(
   const rangeStart = Math.min(hintFrom, hintTo);
   const rangeEnd = Math.max(hintFrom, hintTo);
 
-  for (const candidate of calloutCandidates(selectedText)) {
-    let index = documentText.indexOf(candidate);
-    while (index >= 0) {
-      const end = index + candidate.length;
-      const distance = end < rangeStart
-        ? rangeStart - end
-        : index > rangeEnd
-          ? index - rangeEnd
-          : 0;
+  const consider = (from: number, to: number) => {
+    const distance = to < rangeStart
+      ? rangeStart - to
+      : from > rangeEnd
+        ? from - rangeEnd
+        : 0;
 
-      if (distance < bestDistance) {
-        best = { text: candidate, from: index, to: end };
-        bestDistance = distance;
+    if (distance < bestDistance) {
+      best = { text: documentText.slice(from, to), from, to };
+      bestDistance = distance;
+    }
+  };
+
+  const candidates = calloutCandidates(selectedText);
+  for (const candidate of candidates) {
+    for (const index of findOccurrences(documentText, candidate)) {
+      consider(index, index + candidate.length);
+    }
+  }
+
+  // Rendered selections omit our HTML tags. Search a tag-free view while
+  // retaining a map back to the exact source range, including boundary tags.
+  const searchView = buildSearchView(documentText);
+  for (const candidate of candidates) {
+    for (const index of findOccurrences(searchView.text, candidate)) {
+      const lastIndex = index + candidate.length - 1;
+      if (lastIndex >= index) {
+        const from = searchView.starts[index];
+        const to = searchView.ends[lastIndex];
+        consider(from, to);
       }
-
-      index = documentText.indexOf(candidate, index + 1);
     }
   }
 
@@ -64,42 +100,111 @@ function hasPluginClass(classNames: string): boolean {
   return classNames.split(/\s+/).some((name) => PLUGIN_CLASS.test(name));
 }
 
-function visibleText(html: string): string {
-  return html.replace(/<[^>]+>/g, "");
+function parsePluginMarks(documentText: string): PluginMark[] {
+  const tagPattern = /<mark(?:\s+class="([^"]*)")?\s*>|<\/mark>/g;
+  const stack: Array<{
+    from: number;
+    innerFrom: number;
+    classNames: string;
+    plugin: boolean;
+  }> = [];
+  const marks: PluginMark[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = tagPattern.exec(documentText)) !== null) {
+    if (!match[0].startsWith("</")) {
+      const classNames = match[1] ?? "";
+      stack.push({
+        from: match.index,
+        innerFrom: tagPattern.lastIndex,
+        classNames,
+        plugin: hasPluginClass(classNames),
+      });
+      continue;
+    }
+
+    const opening = stack.pop();
+    if (!opening?.plugin) continue;
+    marks.push({
+      text: documentText.slice(opening.from, tagPattern.lastIndex),
+      from: opening.from,
+      to: tagPattern.lastIndex,
+      classNames: opening.classNames,
+      innerFrom: opening.innerFrom,
+      innerTo: match.index,
+    });
+  }
+
+  return marks.sort((a, b) => a.from - b.from || b.to - a.to);
 }
 
-/** If the user selected all visible contents of an existing highlight, include
- * its source wrapper so recolouring replaces the class rather than nesting tags. */
+function pluginTagRanges(documentText: string): HiddenRange[] {
+  return parsePluginMarks(documentText)
+    .flatMap((mark): HiddenRange[] => [
+      { from: mark.from, to: mark.innerFrom, kind: "open" },
+      { from: mark.innerTo, to: mark.to, kind: "close" },
+    ])
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+}
+
+function buildSearchView(documentText: string): {
+  text: string;
+  starts: number[];
+  ends: number[];
+} {
+  const hiddenRanges = pluginTagRanges(documentText);
+  let text = "";
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let sourceIndex = 0;
+  let rangeIndex = 0;
+  let pendingStart: number | null = null;
+
+  while (sourceIndex < documentText.length) {
+    const hidden = hiddenRanges[rangeIndex];
+    if (hidden && sourceIndex === hidden.from) {
+      if (hidden.kind === "open" && pendingStart === null) {
+        pendingStart = hidden.from;
+      } else if (hidden.kind === "close" && ends.length > 0) {
+        ends[ends.length - 1] = hidden.to;
+      }
+      sourceIndex = hidden.to;
+      rangeIndex += 1;
+      continue;
+    }
+
+    text += documentText[sourceIndex];
+    starts.push(pendingStart ?? sourceIndex);
+    ends.push(sourceIndex + 1);
+    pendingStart = null;
+    sourceIndex += 1;
+  }
+
+  return { text, starts, ends };
+}
+
+export function findPluginMarkAtOffset(
+  documentText: string,
+  offset: number
+): SelectionInfo | null {
+  const candidates = parsePluginMarks(documentText)
+    .filter((mark) => offset >= mark.innerFrom && offset <= mark.innerTo)
+    .sort((a, b) => (a.to - a.from) - (b.to - b.from));
+  const mark = candidates[0];
+  return mark ? { text: mark.text, from: mark.from, to: mark.to } : null;
+}
+
+/** Include the containing source wrapper so partial recolouring or removal
+ * affects one complete highlight instead of producing nested tags. */
 export function expandToPluginMark(
   documentText: string,
   selection: SelectionInfo
 ): SelectionInfo {
-  const before = documentText.slice(0, selection.from);
-  const openStart = before.lastIndexOf("<mark");
-  if (openStart < 0) return selection;
-
-  const openEnd = documentText.indexOf(">", openStart);
-  if (openEnd < 0 || openEnd >= selection.from) return selection;
-
-  const openingTag = documentText.slice(openStart, openEnd + 1);
-  const classMatch = openingTag.match(/^<mark\s+class="([^"]*)">$/);
-  if (!classMatch || !hasPluginClass(classMatch[1])) return selection;
-
-  const nestedOpen = documentText.indexOf("<mark", openEnd + 1);
-  const closeStart = documentText.indexOf("</mark>", openEnd + 1);
-  if (closeStart < selection.to || (nestedOpen >= 0 && nestedOpen < closeStart)) {
-    return selection;
-  }
-
-  const inner = documentText.slice(openEnd + 1, closeStart);
-  if (visibleText(inner) !== selection.text) return selection;
-
-  const to = closeStart + "</mark>".length;
-  return {
-    text: documentText.slice(openStart, to),
-    from: openStart,
-    to,
-  };
+  const candidates = parsePluginMarks(documentText)
+    .filter((mark) => selection.from >= mark.innerFrom && selection.to <= mark.innerTo)
+    .sort((a, b) => (a.to - a.from) - (b.to - b.from));
+  const mark = candidates[0];
+  return mark ? { text: mark.text, from: mark.from, to: mark.to } : selection;
 }
 
 function wrapInline(text: string, colorClass: string): string {
@@ -124,12 +229,47 @@ function wrapInline(text: string, colorClass: string): string {
 }
 
 export function wrapWithMark(text: string, colorClass: string): string {
+  let fence: { character: string; length: number } | null = null;
+
   return text.split("\n").map((line) => {
     if (!line) return line;
-    const callout = line.match(/^((?:>\s*)+)([\s\S]*)$/);
-    if (!callout) return wrapInline(line, colorClass);
-    if (!callout[2]) return line;
-    return `${callout[1]}${wrapInline(callout[2], colorClass)}`;
+    const quote = line.match(/^((?: {0,3}>[ \t]*)+)/)?.[1] ?? "";
+    let content = line.slice(quote.length);
+
+    const fenceMatch = content.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!fence) {
+        fence = { character: marker[0], length: marker.length };
+      } else if (marker[0] === fence.character && marker.length >= fence.length) {
+        fence = null;
+      }
+      return line;
+    }
+    if (fence) return line;
+
+    let prefix = quote;
+    const callout = content.match(/^(\[![^\]]+\][+-]?[ \t]*)/);
+    if (callout) {
+      prefix += callout[1];
+      content = content.slice(callout[1].length);
+    }
+
+    const heading = content.match(/^( {0,3}#{1,6}[ \t]+)/);
+    const list = content.match(
+      /^([ \t]{0,3}(?:(?:[-+*])|(?:\d{1,9}[.)]))[ \t]+(?:\[[ xX]\][ \t]+)?)/
+    );
+    const blockPrefix = heading?.[1] ?? list?.[1] ?? "";
+    prefix += blockPrefix;
+    content = content.slice(blockPrefix.length);
+
+    // Wrapping a whole table row or thematic break would stop it rendering as
+    // a Markdown block. Leave those structural lines untouched.
+    if (/^\|.*\|[ \t]*$/.test(content) || /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/.test(content)) {
+      return line;
+    }
+    if (!content) return line;
+    return `${prefix}${wrapInline(content, colorClass)}`;
   }).join("\n");
 }
 
@@ -148,14 +288,22 @@ export function applyColorToText(
         return !className.startsWith("hlt-");
       });
     classes.push(newClass);
-    return `<mark class="${classes.join(" ")}">${whole[2]}</mark>`;
+    return `<mark class="${classes.join(" ")}">${removeHighlightsFromText(whole[2])}</mark>`;
   }
 
   return wrapWithMark(removeHighlightsFromText(text), newClass);
 }
 
 export function removeHighlightsFromText(text: string): string {
-  return text.replace(MARK_PATTERN, (match, classNames: string, inner: string) => {
-    return hasPluginClass(classNames) ? inner : match;
-  });
+  const hiddenRanges = pluginTagRanges(text);
+  if (hiddenRanges.length === 0) return text;
+
+  let result = "";
+  let cursor = 0;
+  for (const hidden of hiddenRanges) {
+    if (hidden.from < cursor) continue;
+    result += text.slice(cursor, hidden.from);
+    cursor = hidden.to;
+  }
+  return result + text.slice(cursor);
 }

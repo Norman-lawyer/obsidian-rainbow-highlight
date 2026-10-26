@@ -3,6 +3,7 @@ import {
   applyColorToText,
   expandToPluginMark,
   findClosestSelection,
+  findPluginMarkAtOffset,
   HighlightKind,
   removeHighlightsFromText,
   SelectionInfo,
@@ -104,9 +105,25 @@ export default class RainbowHighlightPlugin extends Plugin {
   private currentSelection: SelectionInfo | null = null;
   private selectionTimer: number | null = null;
   private ignoreSelectionUntil = 0;
+  private pointerIsDown = false;
 
   onload() {
-    this.registerDomEvent(document, "pointerup", () => this.queueSelection(30));
+    this.registerDomEvent(document, "pointerdown", () => {
+      this.pointerIsDown = true;
+    });
+
+    this.registerDomEvent(document, "pointerup", () => {
+      this.pointerIsDown = false;
+      this.queueSelection(30);
+    });
+
+    this.registerDomEvent(document, "pointercancel", () => {
+      this.pointerIsDown = false;
+    });
+
+    this.registerDomEvent(document, "selectionchange", () => {
+      if (!this.pointerIsDown) this.queueSelection(80);
+    });
 
     this.registerDomEvent(document, "keyup", (event: KeyboardEvent) => {
       if (event.shiftKey) this.queueSelection(10);
@@ -289,9 +306,15 @@ export default class RainbowHighlightPlugin extends Plugin {
 
   private removeHighlight(editor: Editor) {
     let selectionInfo = this.currentSelection ?? getSelection(editor);
+    const cmView = getCmView(editor);
+    if (!selectionInfo && cmView) {
+      selectionInfo = findPluginMarkAtOffset(
+        cmView.state.doc.toString(),
+        cmView.state.selection.main.from
+      );
+    }
     if (!selectionInfo) return;
 
-    const cmView = getCmView(editor);
     if (cmView) {
       selectionInfo = expandToPluginMark(cmView.state.doc.toString(), selectionInfo);
     }

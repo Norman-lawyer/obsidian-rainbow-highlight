@@ -26,7 +26,6 @@ var import_obsidian = require("obsidian");
 
 // highlight-utils.ts
 var PLUGIN_CLASS = /^(?:hl|hlt)-[\w-]+$/;
-var MARK_PATTERN = /<mark\s+class="([^"]*)">([\s\S]*?)<\/mark>/g;
 function calloutCandidates(text) {
   const normalized = text.replace(/\r\n?/g, "\n");
   const candidates = [normalized];
@@ -40,21 +39,42 @@ function calloutCandidates(text) {
   }
   return [...new Set(candidates)];
 }
+function findOccurrences(text, candidate) {
+  const occurrences = [];
+  let index = text.indexOf(candidate);
+  while (index >= 0) {
+    occurrences.push(index);
+    index = text.indexOf(candidate, index + 1);
+  }
+  return occurrences;
+}
 function findClosestSelection(documentText, selectedText, hintFrom, hintTo = hintFrom) {
   let best = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   const rangeStart = Math.min(hintFrom, hintTo);
   const rangeEnd = Math.max(hintFrom, hintTo);
-  for (const candidate of calloutCandidates(selectedText)) {
-    let index = documentText.indexOf(candidate);
-    while (index >= 0) {
-      const end = index + candidate.length;
-      const distance = end < rangeStart ? rangeStart - end : index > rangeEnd ? index - rangeEnd : 0;
-      if (distance < bestDistance) {
-        best = { text: candidate, from: index, to: end };
-        bestDistance = distance;
+  const consider = (from, to) => {
+    const distance = to < rangeStart ? rangeStart - to : from > rangeEnd ? from - rangeEnd : 0;
+    if (distance < bestDistance) {
+      best = { text: documentText.slice(from, to), from, to };
+      bestDistance = distance;
+    }
+  };
+  const candidates = calloutCandidates(selectedText);
+  for (const candidate of candidates) {
+    for (const index of findOccurrences(documentText, candidate)) {
+      consider(index, index + candidate.length);
+    }
+  }
+  const searchView = buildSearchView(documentText);
+  for (const candidate of candidates) {
+    for (const index of findOccurrences(searchView.text, candidate)) {
+      const lastIndex = index + candidate.length - 1;
+      if (lastIndex >= index) {
+        const from = searchView.starts[index];
+        const to = searchView.ends[lastIndex];
+        consider(from, to);
       }
-      index = documentText.indexOf(candidate, index + 1);
     }
   }
   return best;
@@ -62,35 +82,80 @@ function findClosestSelection(documentText, selectedText, hintFrom, hintTo = hin
 function hasPluginClass(classNames) {
   return classNames.split(/\s+/).some((name) => PLUGIN_CLASS.test(name));
 }
-function visibleText(html) {
-  return html.replace(/<[^>]+>/g, "");
+function parsePluginMarks(documentText) {
+  var _a;
+  const tagPattern = /<mark(?:\s+class="([^"]*)")?\s*>|<\/mark>/g;
+  const stack = [];
+  const marks = [];
+  let match;
+  while ((match = tagPattern.exec(documentText)) !== null) {
+    if (!match[0].startsWith("</")) {
+      const classNames = (_a = match[1]) != null ? _a : "";
+      stack.push({
+        from: match.index,
+        innerFrom: tagPattern.lastIndex,
+        classNames,
+        plugin: hasPluginClass(classNames)
+      });
+      continue;
+    }
+    const opening = stack.pop();
+    if (!(opening == null ? void 0 : opening.plugin))
+      continue;
+    marks.push({
+      text: documentText.slice(opening.from, tagPattern.lastIndex),
+      from: opening.from,
+      to: tagPattern.lastIndex,
+      classNames: opening.classNames,
+      innerFrom: opening.innerFrom,
+      innerTo: match.index
+    });
+  }
+  return marks.sort((a, b) => a.from - b.from || b.to - a.to);
+}
+function pluginTagRanges(documentText) {
+  return parsePluginMarks(documentText).flatMap((mark) => [
+    { from: mark.from, to: mark.innerFrom, kind: "open" },
+    { from: mark.innerTo, to: mark.to, kind: "close" }
+  ]).sort((a, b) => a.from - b.from || a.to - b.to);
+}
+function buildSearchView(documentText) {
+  const hiddenRanges = pluginTagRanges(documentText);
+  let text = "";
+  const starts = [];
+  const ends = [];
+  let sourceIndex = 0;
+  let rangeIndex = 0;
+  let pendingStart = null;
+  while (sourceIndex < documentText.length) {
+    const hidden = hiddenRanges[rangeIndex];
+    if (hidden && sourceIndex === hidden.from) {
+      if (hidden.kind === "open" && pendingStart === null) {
+        pendingStart = hidden.from;
+      } else if (hidden.kind === "close" && ends.length > 0) {
+        ends[ends.length - 1] = hidden.to;
+      }
+      sourceIndex = hidden.to;
+      rangeIndex += 1;
+      continue;
+    }
+    text += documentText[sourceIndex];
+    starts.push(pendingStart != null ? pendingStart : sourceIndex);
+    ends.push(sourceIndex + 1);
+    pendingStart = null;
+    sourceIndex += 1;
+  }
+  return { text, starts, ends };
+}
+function findPluginMarkAtOffset(documentText, offset) {
+  const candidates = parsePluginMarks(documentText).filter((mark2) => offset >= mark2.innerFrom && offset <= mark2.innerTo).sort((a, b) => a.to - a.from - (b.to - b.from));
+  const mark = candidates[0];
+  return mark ? { text: mark.text, from: mark.from, to: mark.to } : null;
 }
 function expandToPluginMark(documentText, selection) {
-  const before = documentText.slice(0, selection.from);
-  const openStart = before.lastIndexOf("<mark");
-  if (openStart < 0)
-    return selection;
-  const openEnd = documentText.indexOf(">", openStart);
-  if (openEnd < 0 || openEnd >= selection.from)
-    return selection;
-  const openingTag = documentText.slice(openStart, openEnd + 1);
-  const classMatch = openingTag.match(/^<mark\s+class="([^"]*)">$/);
-  if (!classMatch || !hasPluginClass(classMatch[1]))
-    return selection;
-  const nestedOpen = documentText.indexOf("<mark", openEnd + 1);
-  const closeStart = documentText.indexOf("</mark>", openEnd + 1);
-  if (closeStart < selection.to || nestedOpen >= 0 && nestedOpen < closeStart) {
-    return selection;
-  }
-  const inner = documentText.slice(openEnd + 1, closeStart);
-  if (visibleText(inner) !== selection.text)
-    return selection;
-  const to = closeStart + "</mark>".length;
-  return {
-    text: documentText.slice(openStart, to),
-    from: openStart,
-    to
-  };
+  const candidates = parsePluginMarks(documentText).filter((mark2) => selection.from >= mark2.innerFrom && selection.to <= mark2.innerTo).sort((a, b) => a.to - a.from - (b.to - b.from));
+  const mark = candidates[0];
+  return mark ? { text: mark.text, from: mark.from, to: mark.to } : selection;
 }
 function wrapInline(text, colorClass) {
   const wrappers = ["***", "___", "**", "__", "~~", "*", "_"];
@@ -106,15 +171,44 @@ function wrapInline(text, colorClass) {
   return `<mark class="${colorClass}">${text}</mark>`;
 }
 function wrapWithMark(text, colorClass) {
+  let fence = null;
   return text.split("\n").map((line) => {
+    var _a, _b, _c, _d;
     if (!line)
       return line;
-    const callout = line.match(/^((?:>\s*)+)([\s\S]*)$/);
-    if (!callout)
-      return wrapInline(line, colorClass);
-    if (!callout[2])
+    const quote = (_b = (_a = line.match(/^((?: {0,3}>[ \t]*)+)/)) == null ? void 0 : _a[1]) != null ? _b : "";
+    let content = line.slice(quote.length);
+    const fenceMatch = content.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!fence) {
+        fence = { character: marker[0], length: marker.length };
+      } else if (marker[0] === fence.character && marker.length >= fence.length) {
+        fence = null;
+      }
       return line;
-    return `${callout[1]}${wrapInline(callout[2], colorClass)}`;
+    }
+    if (fence)
+      return line;
+    let prefix = quote;
+    const callout = content.match(/^(\[![^\]]+\][+-]?[ \t]*)/);
+    if (callout) {
+      prefix += callout[1];
+      content = content.slice(callout[1].length);
+    }
+    const heading = content.match(/^( {0,3}#{1,6}[ \t]+)/);
+    const list = content.match(
+      /^([ \t]{0,3}(?:(?:[-+*])|(?:\d{1,9}[.)]))[ \t]+(?:\[[ xX]\][ \t]+)?)/
+    );
+    const blockPrefix = (_d = (_c = heading == null ? void 0 : heading[1]) != null ? _c : list == null ? void 0 : list[1]) != null ? _d : "";
+    prefix += blockPrefix;
+    content = content.slice(blockPrefix.length);
+    if (/^\|.*\|[ \t]*$/.test(content) || /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/.test(content)) {
+      return line;
+    }
+    if (!content)
+      return line;
+    return `${prefix}${wrapInline(content, colorClass)}`;
   }).join("\n");
 }
 function applyColorToText(text, newClass, kind) {
@@ -126,14 +220,23 @@ function applyColorToText(text, newClass, kind) {
       return !className.startsWith("hlt-");
     });
     classes.push(newClass);
-    return `<mark class="${classes.join(" ")}">${whole[2]}</mark>`;
+    return `<mark class="${classes.join(" ")}">${removeHighlightsFromText(whole[2])}</mark>`;
   }
   return wrapWithMark(removeHighlightsFromText(text), newClass);
 }
 function removeHighlightsFromText(text) {
-  return text.replace(MARK_PATTERN, (match, classNames, inner) => {
-    return hasPluginClass(classNames) ? inner : match;
-  });
+  const hiddenRanges = pluginTagRanges(text);
+  if (hiddenRanges.length === 0)
+    return text;
+  let result = "";
+  let cursor = 0;
+  for (const hidden of hiddenRanges) {
+    if (hidden.from < cursor)
+      continue;
+    result += text.slice(cursor, hidden.from);
+    cursor = hidden.to;
+  }
+  return result + text.slice(cursor);
 }
 
 // main.ts
@@ -206,9 +309,23 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
     this.currentSelection = null;
     this.selectionTimer = null;
     this.ignoreSelectionUntil = 0;
+    this.pointerIsDown = false;
   }
   onload() {
-    this.registerDomEvent(document, "pointerup", () => this.queueSelection(30));
+    this.registerDomEvent(document, "pointerdown", () => {
+      this.pointerIsDown = true;
+    });
+    this.registerDomEvent(document, "pointerup", () => {
+      this.pointerIsDown = false;
+      this.queueSelection(30);
+    });
+    this.registerDomEvent(document, "pointercancel", () => {
+      this.pointerIsDown = false;
+    });
+    this.registerDomEvent(document, "selectionchange", () => {
+      if (!this.pointerIsDown)
+        this.queueSelection(80);
+    });
     this.registerDomEvent(document, "keyup", (event) => {
       if (event.shiftKey)
         this.queueSelection(10);
@@ -370,9 +487,15 @@ var RainbowHighlightPlugin = class extends import_obsidian.Plugin {
   removeHighlight(editor) {
     var _a;
     let selectionInfo = (_a = this.currentSelection) != null ? _a : getSelection(editor);
+    const cmView = getCmView(editor);
+    if (!selectionInfo && cmView) {
+      selectionInfo = findPluginMarkAtOffset(
+        cmView.state.doc.toString(),
+        cmView.state.selection.main.from
+      );
+    }
     if (!selectionInfo)
       return;
-    const cmView = getCmView(editor);
     if (cmView) {
       selectionInfo = expandToPluginMark(cmView.state.doc.toString(), selectionInfo);
     }

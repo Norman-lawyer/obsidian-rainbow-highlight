@@ -5,6 +5,7 @@ import {
   applyColorToText,
   expandToPluginMark,
   findClosestSelection,
+  findPluginMarkAtOffset,
   removeHighlightsFromText,
   wrapWithMark,
 } from "../highlight-utils.ts";
@@ -71,5 +72,91 @@ test("removes combined plugin highlights without touching unrelated marks", () =
       '<mark class="hl-red hlt-blue">hello</mark> <mark>native</mark>'
     ),
     "hello <mark>native</mark>"
+  );
+});
+
+test("expands a partial selection to the containing highlight", () => {
+  const documentText = '<mark class="hl-red">hello world</mark>';
+  const from = documentText.indexOf("world");
+  const expanded = expandToPluginMark(documentText, {
+    text: "world",
+    from,
+    to: from + 5,
+  });
+
+  assert.deepEqual(expanded, {
+    text: documentText,
+    from: 0,
+    to: documentText.length,
+  });
+});
+
+test("finds the highlight containing a collapsed cursor", () => {
+  const documentText = 'before <mark class="hl-green">hello</mark> after';
+  const mark = findPluginMarkAtOffset(
+    documentText,
+    documentText.indexOf("hello") + 2
+  );
+
+  assert.deepEqual(mark, {
+    text: '<mark class="hl-green">hello</mark>',
+    from: 7,
+    to: 42,
+  });
+});
+
+test("removes all nested plugin marks in one action", () => {
+  assert.equal(
+    removeHighlightsFromText(
+      '<mark class="hl-red">hello <mark class="hl-blue">world</mark></mark>'
+    ),
+    "hello world"
+  );
+});
+
+test("maps rendered multiline text across existing mark tags", () => {
+  const documentText =
+    '<mark class="hl-red">first</mark>\n> <mark class="hl-red">second</mark>';
+  const result = findClosestSelection(
+    documentText,
+    "first\nsecond",
+    documentText.indexOf("second")
+  );
+
+  assert.deepEqual(result, {
+    text: documentText,
+    from: 0,
+    to: documentText.length,
+  });
+});
+
+test("expands a rendered partial selection ending at a highlight boundary", () => {
+  const documentText = '<mark class="hl-red">hello world</mark>';
+  const mapped = findClosestSelection(
+    documentText,
+    "world",
+    documentText.indexOf("world")
+  );
+
+  assert.ok(mapped);
+  assert.deepEqual(expandToPluginMark(documentText, mapped), {
+    text: documentText,
+    from: 0,
+    to: documentText.length,
+  });
+});
+
+test("preserves task lists, headings, and callout lists", () => {
+  assert.equal(
+    wrapWithMark("- [ ] first task\n- second item", "hl-yellow"),
+    '- [ ] <mark class="hl-yellow">first task</mark>\n- <mark class="hl-yellow">second item</mark>'
+  );
+  assert.equal(
+    wrapWithMark("## Heading\nparagraph", "hl-blue"),
+    '## <mark class="hl-blue">Heading</mark>\n<mark class="hl-blue">paragraph</mark>'
+  );
+  assert.equal(
+    wrapWithMark("> - [ ] first task", "hl-green"),
+    '> - [ ] <mark class="hl-green">first task</mark>'
   );
 });
