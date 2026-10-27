@@ -1,8 +1,8 @@
 {
   "id": "rainbow-highlight",
   "name": "Rainbow Highlight",
-  "version": "1.1.5",
-  "minAppVersion": "0.15.0",
+  "version": "1.1.6",
+  "minAppVersion": "1.13.1",
   "description": "Beautiful multi-color text highlighting with a quick color palette popup.",
   "author": "Norman-lawyer",
   "authorUrl": "https://github.com/Norman-lawyer",

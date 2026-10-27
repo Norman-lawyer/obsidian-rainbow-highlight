@@ -624,65 +624,123 @@ var RainbowHighlightSettingTab = class extends import_obsidian.PluginSettingTab 
     super(app, owner);
     this.owner = owner;
   }
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.addClass("rainbow-highlight-settings");
-    containerEl.createEl("h2", {
-      text: "Rainbow Highlight",
-      cls: "rainbow-highlight-settings-header"
-    });
-    containerEl.createEl("p", {
-      text: "Tune the palette without changing existing highlights. \u81EA\u5B9A\u4E49\u8C03\u8272\u76D8\uFF0C\u4E0D\u4F1A\u5F71\u54CD\u5DF2\u6709\u9AD8\u4EAE\u3002",
-      cls: "rainbow-highlight-setting-intro"
-    });
-    new import_obsidian.Setting(containerEl).setName("Behavior / \u4EA4\u4E92").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Auto-open palette / \u81EA\u52A8\u6253\u5F00\u8C03\u8272\u76D8").setDesc("Show the palette after selecting text. \u9009\u4E2D\u6587\u5B57\u540E\u81EA\u52A8\u663E\u793A\u8C03\u8272\u76D8\u3002").addToggle((toggle) => {
-      toggle.setValue(this.owner.settings.autoOpenPalette).onChange(async (value) => {
-        await this.owner.updateSettings({ autoOpenPalette: value });
-      });
-    });
-    new import_obsidian.Setting(containerEl).setName("Palette delay / \u8C03\u8272\u76D8\u5EF6\u65F6").setDesc("A short delay helps complex selections settle. \u9002\u5F53\u5EF6\u65F6\u53EF\u63D0\u9AD8\u590D\u6742\u9009\u533A\u7684\u7A33\u5B9A\u6027\u3002").addSlider((slider) => {
-      slider.setLimits(0, 200, 10).setValue(this.owner.settings.popupDelay).setDisplayFormat((value) => `${value} ms`).onChange(async (value) => {
-        await this.owner.updateSettings({ popupDelay: value });
-      });
-    });
-    new import_obsidian.Setting(containerEl).setName("Palette colors / \u8C03\u8272\u76D8\u914D\u8272").setHeading();
-    containerEl.createEl("p", {
-      text: "Hidden colors remain available as commands and existing notes keep their appearance. \u9690\u85CF\u7684\u989C\u8272\u4ECD\u53EF\u901A\u8FC7\u547D\u4EE4\u4F7F\u7528\uFF0C\u4E5F\u4E0D\u4F1A\u6539\u53D8\u65E7\u7B14\u8BB0\u3002",
-      cls: "setting-item-description rainbow-highlight-palette-note"
-    });
-    HIGHLIGHT_COLORS.forEach((color) => {
-      const setting = new import_obsidian.Setting(containerEl).setName(color.name).setDesc(`${color.class} / ${color.class.replace(/^hl-/, "hlt-")}`).setClass("rainbow-highlight-color-setting");
-      const swatch = document.createElement("span");
-      swatch.addClass("rainbow-highlight-swatch");
-      swatch.style.setProperty("--rainbow-highlight-swatch", color.bg);
-      swatch.setAttribute("aria-hidden", "true");
-      setting.nameEl.prepend(swatch);
-      setting.addToggle((toggle) => {
-        toggle.setValue(this.owner.settings.enabledColorIds.includes(color.id)).onChange(async (enabled) => {
-          const current = this.owner.settings.enabledColorIds;
-          if (!enabled && current.length === 1 && current.includes(color.id)) {
-            toggle.setValue(true);
-            new import_obsidian.Notice("Rainbow Highlight: keep at least one palette color. / \u8BF7\u81F3\u5C11\u4FDD\u7559\u4E00\u79CD\u989C\u8272\u3002");
-            return;
+  getControlValue(key) {
+    if (key === "autoOpenPalette")
+      return this.owner.settings.autoOpenPalette;
+    if (key === "popupDelay")
+      return this.owner.settings.popupDelay;
+    return void 0;
+  }
+  async setControlValue(key, value) {
+    if (key === "autoOpenPalette" && typeof value === "boolean") {
+      await this.owner.updateSettings({ autoOpenPalette: value });
+      return;
+    }
+    if (key === "popupDelay" && typeof value === "number") {
+      await this.owner.updateSettings({ popupDelay: value });
+    }
+  }
+  getSettingDefinitions() {
+    return [
+      {
+        name: "Rainbow Highlight",
+        desc: "Tune the palette without changing existing highlights. \u81EA\u5B9A\u4E49\u8C03\u8272\u76D8\uFF0C\u4E0D\u4F1A\u5F71\u54CD\u5DF2\u6709\u9AD8\u4EAE\u3002",
+        searchable: false,
+        render: (setting) => {
+          this.containerEl.addClass("rainbow-highlight-settings");
+          setting.setName("Rainbow Highlight").setDesc(
+            "Tune the palette without changing existing highlights. \u81EA\u5B9A\u4E49\u8C03\u8272\u76D8\uFF0C\u4E0D\u4F1A\u5F71\u54CD\u5DF2\u6709\u9AD8\u4EAE\u3002"
+          ).setHeading().setClass("rainbow-highlight-settings-header");
+        }
+      },
+      {
+        type: "group",
+        heading: "Behavior / \u4EA4\u4E92",
+        items: [
+          {
+            name: "Auto-open palette / \u81EA\u52A8\u6253\u5F00\u8C03\u8272\u76D8",
+            desc: "Show the palette after selecting text. \u9009\u4E2D\u6587\u5B57\u540E\u81EA\u52A8\u663E\u793A\u8C03\u8272\u76D8\u3002",
+            control: {
+              type: "toggle",
+              key: "autoOpenPalette"
+            }
+          },
+          {
+            name: "Palette delay / \u8C03\u8272\u76D8\u5EF6\u65F6",
+            desc: "A short delay helps complex selections settle. \u9002\u5F53\u5EF6\u65F6\u53EF\u63D0\u9AD8\u590D\u6742\u9009\u533A\u7684\u7A33\u5B9A\u6027\u3002",
+            control: {
+              type: "slider",
+              key: "popupDelay",
+              min: 0,
+              max: 200,
+              step: 10,
+              displayFormat: (value) => `${value} ms`
+            }
           }
-          const enabledColorIds = enabled ? [...current, color.id] : current.filter((id) => id !== color.id);
-          await this.owner.updateSettings({ enabledColorIds });
-        });
-      });
-    });
-    new import_obsidian.Setting(containerEl).setName("Reset settings / \u6062\u590D\u9ED8\u8BA4").setDesc("Restore all seven colors and the default palette behavior. \u6062\u590D 7 \u79CD\u914D\u8272\u548C\u9ED8\u8BA4\u4EA4\u4E92\u3002").addButton((button) => {
-      button.setButtonText("Reset / \u91CD\u7F6E").onClick(async () => {
-        await this.owner.updateSettings({
-          enabledColorIds: [...DEFAULT_SETTINGS.enabledColorIds],
-          autoOpenPalette: DEFAULT_SETTINGS.autoOpenPalette,
-          popupDelay: DEFAULT_SETTINGS.popupDelay
-        });
-        this.display();
-        new import_obsidian.Notice("Rainbow Highlight: settings reset. / \u8BBE\u7F6E\u5DF2\u91CD\u7F6E\u3002");
-      });
-    });
+        ]
+      },
+      {
+        type: "group",
+        heading: "Palette colors / \u8C03\u8272\u76D8\u914D\u8272",
+        items: [
+          {
+            name: "About hidden colors / \u9690\u85CF\u914D\u8272\u8BF4\u660E",
+            desc: "Hidden colors remain available as commands and existing notes keep their appearance. \u9690\u85CF\u7684\u989C\u8272\u4ECD\u53EF\u901A\u8FC7\u547D\u4EE4\u4F7F\u7528\uFF0C\u4E5F\u4E0D\u4F1A\u6539\u53D8\u65E7\u7B14\u8BB0\u3002",
+            searchable: false
+          },
+          ...HIGHLIGHT_COLORS.map((color) => ({
+            name: color.name,
+            desc: `${color.class} / ${color.class.replace(/^hl-/, "hlt-")}`,
+            render: (setting) => {
+              setting.setName(color.name).setDesc(
+                `${color.class} / ${color.class.replace(/^hl-/, "hlt-")}`
+              ).setClass("rainbow-highlight-color-setting");
+              const swatch = setting.nameEl.createSpan({
+                cls: "rainbow-highlight-swatch",
+                attr: { "aria-hidden": "true" }
+              });
+              swatch.setCssProps({ "--rainbow-highlight-swatch": color.bg });
+              setting.nameEl.prepend(swatch);
+              setting.addToggle((toggle) => {
+                toggle.setValue(
+                  this.owner.settings.enabledColorIds.includes(color.id)
+                ).onChange(async (enabled) => {
+                  const current = this.owner.settings.enabledColorIds;
+                  if (!enabled && current.length === 1 && current.includes(color.id)) {
+                    toggle.setValue(true);
+                    new import_obsidian.Notice(
+                      "Keep at least one palette color. / \u8BF7\u81F3\u5C11\u4FDD\u7559\u4E00\u79CD\u989C\u8272\u3002"
+                    );
+                    return;
+                  }
+                  const enabledColorIds = enabled ? [...current, color.id] : current.filter((id) => id !== color.id);
+                  await this.owner.updateSettings({ enabledColorIds });
+                });
+              });
+            }
+          }))
+        ]
+      },
+      {
+        name: "Reset settings / \u6062\u590D\u9ED8\u8BA4",
+        desc: "Restore all seven colors and the default palette behavior. \u6062\u590D 7 \u79CD\u914D\u8272\u548C\u9ED8\u8BA4\u4EA4\u4E92\u3002",
+        render: (setting) => {
+          setting.setName("Reset settings / \u6062\u590D\u9ED8\u8BA4").setDesc(
+            "Restore all seven colors and the default palette behavior. \u6062\u590D 7 \u79CD\u914D\u8272\u548C\u9ED8\u8BA4\u4EA4\u4E92\u3002"
+          ).addButton((button) => {
+            button.setButtonText("Reset / \u91CD\u7F6E").onClick(async () => {
+              await this.owner.updateSettings({
+                enabledColorIds: [...DEFAULT_SETTINGS.enabledColorIds],
+                autoOpenPalette: DEFAULT_SETTINGS.autoOpenPalette,
+                popupDelay: DEFAULT_SETTINGS.popupDelay
+              });
+              this.update();
+              new import_obsidian.Notice("Settings reset. / \u8BBE\u7F6E\u5DF2\u91CD\u7F6E\u3002");
+            });
+          });
+        }
+      }
+    ];
   }
 };
 
@@ -695,7 +753,7 @@ function getDomSelection(editor, sourceText) {
   const cmView = getCmView(editor);
   if (!cmView)
     return null;
-  const domSelection = window.getSelection();
+  const domSelection = activeWindow.getSelection();
   if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
     return null;
   }
@@ -765,10 +823,10 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new RainbowHighlightSettingTab(this.app, this));
-    this.registerDomEvent(document, "pointerdown", () => {
+    this.registerDomEvent(activeDocument, "pointerdown", () => {
       this.pointerIsDown = true;
     });
-    this.registerDomEvent(document, "pointerup", (event) => {
+    this.registerDomEvent(activeDocument, "pointerup", (event) => {
       this.pointerIsDown = false;
       if (shouldQueueSelectionAfterPointerUp(
         this.popover,
@@ -777,14 +835,14 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
         this.queueSelection(this.settings.popupDelay);
       }
     });
-    this.registerDomEvent(document, "pointercancel", () => {
+    this.registerDomEvent(activeDocument, "pointercancel", () => {
       const pointerWasDown = this.pointerIsDown;
       this.pointerIsDown = false;
       if (shouldQueueSelectionAfterPointerCancel(pointerWasDown)) {
         this.queueSelection(this.settings.popupDelay);
       }
     });
-    this.registerDomEvent(document, "mouseup", (event) => {
+    this.registerDomEvent(activeDocument, "mouseup", (event) => {
       if (!this.pointerIsDown)
         return;
       this.pointerIsDown = false;
@@ -795,21 +853,26 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
         this.queueSelection(this.settings.popupDelay);
       }
     });
-    this.registerDomEvent(document, "selectionchange", () => {
+    this.registerDomEvent(activeDocument, "selectionchange", () => {
       if (!this.pointerIsDown)
         this.queueSelection(this.settings.popupDelay);
     });
-    this.registerDomEvent(document, "keyup", (event) => {
+    this.registerDomEvent(activeDocument, "keyup", (event) => {
       if (event.shiftKey)
         this.queueSelection(this.settings.popupDelay);
     });
-    this.registerDomEvent(document, "mousedown", (event) => {
+    this.registerDomEvent(activeDocument, "mousedown", (event) => {
       if (this.popover && !this.popover.contains(event.target)) {
         this.removePopover(true);
       }
     });
-    this.registerDomEvent(document, "scroll", () => this.removePopover(true), true);
-    this.registerDomEvent(window, "resize", () => this.removePopover(true));
+    this.registerDomEvent(
+      activeDocument,
+      "scroll",
+      () => this.removePopover(true),
+      true
+    );
+    this.registerDomEvent(activeWindow, "resize", () => this.removePopover(true));
     HIGHLIGHT_COLORS.forEach((color) => {
       this.addCommand({
         id: `highlight-${color.class}`,
@@ -847,13 +910,15 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
     });
   }
   onunload() {
-    if (this.selectionTimer !== null)
+    if (this.selectionTimer !== null) {
       window.clearTimeout(this.selectionTimer);
+    }
     this.removePopover(true);
   }
   queueSelection(delay) {
-    if (this.selectionTimer !== null)
+    if (this.selectionTimer !== null) {
       window.clearTimeout(this.selectionTimer);
+    }
     this.selectionTimer = window.setTimeout(() => {
       this.selectionTimer = null;
       this.handleSelection();
@@ -872,7 +937,7 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
       this.removePopover(true);
       return;
     }
-    const domSelection = window.getSelection();
+    const domSelection = activeWindow.getSelection();
     const anchor = domSelection == null ? void 0 : domSelection.anchorNode;
     if (!anchor || !activeView.containerEl.contains(anchor)) {
       this.removePopover(true);
@@ -904,8 +969,7 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
   }
   showPopover(rect, editor) {
     this.removePopover(false);
-    const popover = document.createElement("div");
-    popover.addClass("hl-popover");
+    const popover = createDiv({ cls: "hl-popover" });
     popover.setAttribute("role", "toolbar");
     popover.setAttribute("aria-label", "Rainbow Highlight colors");
     popover.addEventListener("mousedown", (event) => {
@@ -925,15 +989,16 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
       const buttons = Array.from(
         popover.querySelectorAll("button")
       );
-      const current = buttons.indexOf(document.activeElement);
+      const current = buttons.indexOf(
+        activeDocument.activeElement
+      );
       if (current < 0)
         return;
       const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
       event.preventDefault();
       (_a = buttons[(current + step + buttons.length) % buttons.length]) == null ? void 0 : _a.focus();
     });
-    const container = document.createElement("div");
-    container.addClass("hl-popover-colors");
+    const container = createDiv({ cls: "hl-popover-colors" });
     const sourceText = this.getSourceText(editor);
     const colorState = sourceText && this.currentSelection ? getSelectionColorState(sourceText, this.currentSelection) : { bg: null, text: null };
     const backgroundRow = this.buildRow(
@@ -952,33 +1017,33 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
     );
     container.appendChild(textRow);
     popover.appendChild(container);
-    document.body.appendChild(popover);
+    activeDocument.body.appendChild(popover);
     const popoverRect = popover.getBoundingClientRect();
     const position = positionSelectionPopover(
       rect,
       popoverRect,
-      { width: window.innerWidth, height: window.innerHeight }
+      { width: activeWindow.innerWidth, height: activeWindow.innerHeight }
     );
-    popover.style.top = `${position.top}px`;
-    popover.style.left = `${position.left}px`;
+    popover.setCssStyles({
+      top: `${position.top}px`,
+      left: `${position.left}px`
+    });
     this.popover = popover;
   }
   buildRow(editor, kind, labelText, activeClass) {
-    const row = document.createElement("div");
-    row.addClass("hl-popover-row");
-    const label = document.createElement("div");
-    label.addClass("hl-row-icon");
+    const row = createDiv({ cls: "hl-popover-row" });
+    const label = createDiv({ cls: "hl-row-icon" });
     label.setAttribute("aria-label", labelText);
     label.setAttribute("title", labelText);
     (0, import_obsidian2.setIcon)(label, kind === "bg" ? "highlighter" : "type");
-    const visibleLabel = document.createElement("span");
-    visibleLabel.addClass("hl-row-label-text");
-    visibleLabel.setText(labelText);
+    const visibleLabel = createSpan({
+      cls: "hl-row-label-text",
+      text: labelText
+    });
     label.appendChild(visibleLabel);
     row.appendChild(label);
     getEnabledHighlightColors(this.settings).forEach((color) => {
-      const circle = document.createElement("button");
-      circle.addClass("hl-color-circle");
+      const circle = createEl("button", { cls: "hl-color-circle" });
       const colorClass = kind === "bg" ? color.class : color.class.replace(/^hl-/, "hlt-");
       const isActive = activeClass === colorClass;
       const tooltip = isActive ? `Remove ${labelText.toLowerCase()}: ${color.name.toLowerCase()}` : `${labelText}: ${color.name.toLowerCase()}`;
@@ -988,11 +1053,13 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
       if (isActive)
         circle.addClass("is-active");
       if (kind === "bg") {
-        circle.style.setProperty("--circle-bg", color.bg);
-        circle.style.setProperty("--circle-border", color.color);
+        circle.setCssProps({
+          "--circle-bg": color.bg,
+          "--circle-border": color.color
+        });
       } else {
         circle.addClass("hl-text-circle");
-        circle.style.setProperty("--circle-text", color.bg);
+        circle.setCssProps({ "--circle-text": color.bg });
         circle.setText("A");
       }
       circle.addEventListener("click", (event) => {
@@ -1013,18 +1080,18 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
     const activeView = this.app.workspace.getActiveViewOfType(import_obsidian2.MarkdownView);
     const selectionInfo = getSelection(editor);
     if (!activeView || !selectionInfo) {
-      new import_obsidian2.Notice("Rainbow Highlight: select text first. / \u8BF7\u5148\u9009\u4E2D\u6587\u5B57\u3002");
+      new import_obsidian2.Notice("Select text first. / \u8BF7\u5148\u9009\u4E2D\u6587\u5B57\u3002");
       return;
     }
     const sourceText = this.getSourceText(editor);
     if (sourceText && selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)) {
       new import_obsidian2.Notice(
-        "Rainbow Highlight: highlighting is unavailable inside code, math, links, or properties."
+        "Highlighting is unavailable inside code, math, links, or properties."
       );
       return;
     }
     let rect = null;
-    const domSelection = window.getSelection();
+    const domSelection = activeWindow.getSelection();
     if ((domSelection == null ? void 0 : domSelection.anchorNode) && domSelection.rangeCount > 0 && activeView.containerEl.contains(domSelection.anchorNode)) {
       const rangeRect = domSelection.getRangeAt(0).getBoundingClientRect();
       if (hasUsableSelectionRect(rangeRect))
@@ -1050,15 +1117,16 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
       }
     }
     if (!rect || !hasUsableSelectionRect(rect)) {
-      new import_obsidian2.Notice("Rainbow Highlight: unable to locate the selection. / \u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u9009\u533A\u3002");
+      new import_obsidian2.Notice("Unable to locate the selection. / \u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u9009\u533A\u3002");
       return;
     }
     this.currentSelection = selectionInfo;
     this.showPopover(rect, editor);
   }
   buildRemoveButton(editor, action) {
-    const button = document.createElement("button");
-    button.addClass("hl-color-circle", "hl-remove-circle");
+    const button = createEl("button", {
+      cls: ["hl-color-circle", "hl-remove-circle"]
+    });
     const label = action === "text" ? "Remove text color" : "Remove highlight";
     button.setAttribute("aria-label", label);
     button.setAttribute("title", label);
@@ -1095,7 +1163,7 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
     }
   }
   clearDomSelection() {
-    const selection = window.getSelection();
+    const selection = activeWindow.getSelection();
     if (selection && !selection.isCollapsed)
       selection.removeAllRanges();
   }
@@ -1122,7 +1190,7 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
         });
         return true;
       } catch (e) {
-        new import_obsidian2.Notice("Rainbow Highlight: selection changed; please select the text again.");
+        new import_obsidian2.Notice("Selection changed; please select the text again.");
         return false;
       }
     }
@@ -1152,7 +1220,7 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
     const sourceText = this.getSourceText(editor);
     if (sourceText && selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)) {
       new import_obsidian2.Notice(
-        "Rainbow Highlight: highlighting is unavailable inside code, math, links, or properties."
+        "Highlighting is unavailable inside code, math, links, or properties."
       );
       this.currentSelection = null;
       return;
@@ -1240,7 +1308,7 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
     if (this.settings.hasSeenWelcome)
       return;
     new import_obsidian2.Notice(
-      "Rainbow Highlight: select text to open the palette. Active colors can be removed with one click. / \u9009\u4E2D\u6587\u5B57\u5373\u53EF\u6253\u5F00\u8C03\u8272\u76D8\uFF0C\u70B9\u51FB\u5DF2\u9009\u989C\u8272\u53EF\u76F4\u63A5\u53D6\u6D88\u3002",
+      "Select text to open the palette. Active colors can be removed with one click. / \u9009\u4E2D\u6587\u5B57\u5373\u53EF\u6253\u5F00\u8C03\u8272\u76D8\uFF0C\u70B9\u51FB\u5DF2\u9009\u989C\u8272\u53EF\u76F4\u63A5\u53D6\u6D88\u3002",
       8e3
     );
     await this.updateSettings({ hasSeenWelcome: true });

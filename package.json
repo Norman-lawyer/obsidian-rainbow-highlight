@@ -1,11 +1,12 @@
 {
   "name": "obsidian-rainbow-highlight",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "Beautiful multi-color text highlighting for Obsidian",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "lint": "eslint '*.ts'",
     "test": "node --import tsx --test tests/*.test.mjs",
     "test:coverage": "node --experimental-test-coverage --import tsx --test tests/*.test.mjs"
   },
@@ -13,6 +14,8 @@
     "@types/node": "^16.11.6",
     "builtin-modules": "3.3.0",
     "esbuild": "0.17.3",
+    "eslint": "^10.13.0",
+    "eslint-plugin-obsidianmd": "^0.4.2",
     "obsidian": "latest",
     "tslib": "2.4.0",
     "tsx": "^4.23.15",

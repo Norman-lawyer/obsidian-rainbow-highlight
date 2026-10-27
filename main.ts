@@ -1,4 +1,10 @@
-import { Editor, MarkdownView, Notice, Plugin, setIcon } from "obsidian";
+import {
+  Editor,
+  MarkdownView,
+  Notice,
+  Plugin,
+  setIcon,
+} from "obsidian";
 import {
   applyColorToSelection,
   applyColorToText,
@@ -58,7 +64,7 @@ function getDomSelection(
 ): SelectionInfo | null {
   const cmView = getCmView(editor);
   if (!cmView) return null;
-  const domSelection = window.getSelection();
+  const domSelection = activeWindow.getSelection();
   if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
     return null;
   }
@@ -138,11 +144,11 @@ export default class RainbowHighlightPlugin extends Plugin {
     await this.loadSettings();
     this.addSettingTab(new RainbowHighlightSettingTab(this.app, this));
 
-    this.registerDomEvent(document, "pointerdown", () => {
+    this.registerDomEvent(activeDocument, "pointerdown", () => {
       this.pointerIsDown = true;
     });
 
-    this.registerDomEvent(document, "pointerup", (event: PointerEvent) => {
+    this.registerDomEvent(activeDocument, "pointerup", (event: PointerEvent) => {
       this.pointerIsDown = false;
       if (
         shouldQueueSelectionAfterPointerUp(
@@ -154,7 +160,7 @@ export default class RainbowHighlightPlugin extends Plugin {
       }
     });
 
-    this.registerDomEvent(document, "pointercancel", () => {
+    this.registerDomEvent(activeDocument, "pointercancel", () => {
       const pointerWasDown = this.pointerIsDown;
       this.pointerIsDown = false;
       if (shouldQueueSelectionAfterPointerCancel(pointerWasDown)) {
@@ -165,7 +171,7 @@ export default class RainbowHighlightPlugin extends Plugin {
     // Electron can occasionally finish a text drag with mouseup but without a
     // matching pointerup. Only use this as a fallback when the pointer flag is
     // still set, so normal gestures are not scheduled twice.
-    this.registerDomEvent(document, "mouseup", (event: MouseEvent) => {
+    this.registerDomEvent(activeDocument, "mouseup", (event: MouseEvent) => {
       if (!this.pointerIsDown) return;
       this.pointerIsDown = false;
       if (
@@ -178,22 +184,27 @@ export default class RainbowHighlightPlugin extends Plugin {
       }
     });
 
-    this.registerDomEvent(document, "selectionchange", () => {
+    this.registerDomEvent(activeDocument, "selectionchange", () => {
       if (!this.pointerIsDown) this.queueSelection(this.settings.popupDelay);
     });
 
-    this.registerDomEvent(document, "keyup", (event: KeyboardEvent) => {
+    this.registerDomEvent(activeDocument, "keyup", (event: KeyboardEvent) => {
       if (event.shiftKey) this.queueSelection(this.settings.popupDelay);
     });
 
-    this.registerDomEvent(document, "mousedown", (event: MouseEvent) => {
+    this.registerDomEvent(activeDocument, "mousedown", (event: MouseEvent) => {
       if (this.popover && !this.popover.contains(event.target as Node)) {
         this.removePopover(true);
       }
     });
 
-    this.registerDomEvent(document, "scroll", () => this.removePopover(true), true);
-    this.registerDomEvent(window, "resize", () => this.removePopover(true));
+    this.registerDomEvent(
+      activeDocument,
+      "scroll",
+      () => this.removePopover(true),
+      true
+    );
+    this.registerDomEvent(activeWindow, "resize", () => this.removePopover(true));
 
     HIGHLIGHT_COLORS.forEach((color) => {
       this.addCommand({
@@ -235,12 +246,16 @@ export default class RainbowHighlightPlugin extends Plugin {
   }
 
   onunload() {
-    if (this.selectionTimer !== null) window.clearTimeout(this.selectionTimer);
+    if (this.selectionTimer !== null) {
+      window.clearTimeout(this.selectionTimer);
+    }
     this.removePopover(true);
   }
 
   private queueSelection(delay: number) {
-    if (this.selectionTimer !== null) window.clearTimeout(this.selectionTimer);
+    if (this.selectionTimer !== null) {
+      window.clearTimeout(this.selectionTimer);
+    }
     this.selectionTimer = window.setTimeout(() => {
       this.selectionTimer = null;
       this.handleSelection();
@@ -259,7 +274,7 @@ export default class RainbowHighlightPlugin extends Plugin {
       return;
     }
 
-    const domSelection = window.getSelection();
+    const domSelection = activeWindow.getSelection();
     const anchor = domSelection?.anchorNode;
     if (!anchor || !activeView.containerEl.contains(anchor)) {
       this.removePopover(true);
@@ -300,8 +315,7 @@ export default class RainbowHighlightPlugin extends Plugin {
   private showPopover(rect: SelectionRectLike, editor: Editor) {
     this.removePopover(false);
 
-    const popover = document.createElement("div");
-    popover.addClass("hl-popover");
+    const popover = createDiv({ cls: "hl-popover" });
     popover.setAttribute("role", "toolbar");
     popover.setAttribute("aria-label", "Rainbow Highlight colors");
     popover.addEventListener("mousedown", (event) => {
@@ -321,14 +335,15 @@ export default class RainbowHighlightPlugin extends Plugin {
       const buttons = Array.from(
         popover.querySelectorAll<HTMLButtonElement>("button")
       );
-      const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const current = buttons.indexOf(
+        activeDocument.activeElement as HTMLButtonElement
+      );
       if (current < 0) return;
       const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
       event.preventDefault();
       buttons[(current + step + buttons.length) % buttons.length]?.focus();
     });
-    const container = document.createElement("div");
-    container.addClass("hl-popover-colors");
+    const container = createDiv({ cls: "hl-popover-colors" });
 
     const sourceText = this.getSourceText(editor);
     const colorState = sourceText && this.currentSelection
@@ -350,17 +365,19 @@ export default class RainbowHighlightPlugin extends Plugin {
     );
     container.appendChild(textRow);
     popover.appendChild(container);
-    document.body.appendChild(popover);
+    activeDocument.body.appendChild(popover);
 
     const popoverRect = popover.getBoundingClientRect();
     const position = positionSelectionPopover(
       rect,
       popoverRect,
-      { width: window.innerWidth, height: window.innerHeight }
+      { width: activeWindow.innerWidth, height: activeWindow.innerHeight }
     );
 
-    popover.style.top = `${position.top}px`;
-    popover.style.left = `${position.left}px`;
+    popover.setCssStyles({
+      top: `${position.top}px`,
+      left: `${position.left}px`,
+    });
     this.popover = popover;
   }
 
@@ -370,22 +387,20 @@ export default class RainbowHighlightPlugin extends Plugin {
     labelText: string,
     activeClass: string | null
   ): HTMLElement {
-    const row = document.createElement("div");
-    row.addClass("hl-popover-row");
-    const label = document.createElement("div");
-    label.addClass("hl-row-icon");
+    const row = createDiv({ cls: "hl-popover-row" });
+    const label = createDiv({ cls: "hl-row-icon" });
     label.setAttribute("aria-label", labelText);
     label.setAttribute("title", labelText);
     setIcon(label, kind === "bg" ? "highlighter" : "type");
-    const visibleLabel = document.createElement("span");
-    visibleLabel.addClass("hl-row-label-text");
-    visibleLabel.setText(labelText);
+    const visibleLabel = createSpan({
+      cls: "hl-row-label-text",
+      text: labelText,
+    });
     label.appendChild(visibleLabel);
     row.appendChild(label);
 
     getEnabledHighlightColors(this.settings).forEach((color) => {
-      const circle = document.createElement("button");
-      circle.addClass("hl-color-circle");
+      const circle = createEl("button", { cls: "hl-color-circle" });
       const colorClass = kind === "bg"
         ? color.class
         : color.class.replace(/^hl-/, "hlt-");
@@ -398,11 +413,13 @@ export default class RainbowHighlightPlugin extends Plugin {
       circle.setAttribute("aria-pressed", String(isActive));
       if (isActive) circle.addClass("is-active");
       if (kind === "bg") {
-        circle.style.setProperty("--circle-bg", color.bg);
-        circle.style.setProperty("--circle-border", color.color);
+        circle.setCssProps({
+          "--circle-bg": color.bg,
+          "--circle-border": color.color,
+        });
       } else {
         circle.addClass("hl-text-circle");
-        circle.style.setProperty("--circle-text", color.bg);
+        circle.setCssProps({ "--circle-text": color.bg });
         circle.setText("A");
       }
 
@@ -427,7 +444,7 @@ export default class RainbowHighlightPlugin extends Plugin {
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
     const selectionInfo = getSelection(editor);
     if (!activeView || !selectionInfo) {
-      new Notice("Rainbow Highlight: select text first. / 请先选中文字。");
+      new Notice("Select text first. / 请先选中文字。");
       return;
     }
 
@@ -437,13 +454,13 @@ export default class RainbowHighlightPlugin extends Plugin {
       selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)
     ) {
       new Notice(
-        "Rainbow Highlight: highlighting is unavailable inside code, math, links, or properties."
+        "Highlighting is unavailable inside code, math, links, or properties."
       );
       return;
     }
 
     let rect: SelectionRectLike | null = null;
-    const domSelection = window.getSelection();
+    const domSelection = activeWindow.getSelection();
     if (
       domSelection?.anchorNode &&
       domSelection.rangeCount > 0 &&
@@ -474,7 +491,7 @@ export default class RainbowHighlightPlugin extends Plugin {
     }
 
     if (!rect || !hasUsableSelectionRect(rect)) {
-      new Notice("Rainbow Highlight: unable to locate the selection. / 无法定位当前选区。");
+      new Notice("Unable to locate the selection. / 无法定位当前选区。");
       return;
     }
 
@@ -486,8 +503,9 @@ export default class RainbowHighlightPlugin extends Plugin {
     editor: Editor,
     action: PaletteRemoveAction
   ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.addClass("hl-color-circle", "hl-remove-circle");
+    const button = createEl("button", {
+      cls: ["hl-color-circle", "hl-remove-circle"],
+    });
     const label = action === "text" ? "Remove text color" : "Remove highlight";
     button.setAttribute("aria-label", label);
     button.setAttribute("title", label);
@@ -528,7 +546,7 @@ export default class RainbowHighlightPlugin extends Plugin {
   }
 
   private clearDomSelection() {
-    const selection = window.getSelection();
+    const selection = activeWindow.getSelection();
     if (selection && !selection.isCollapsed) selection.removeAllRanges();
   }
 
@@ -557,7 +575,7 @@ export default class RainbowHighlightPlugin extends Plugin {
         });
         return true;
       } catch {
-        new Notice("Rainbow Highlight: selection changed; please select the text again.");
+        new Notice("Selection changed; please select the text again.");
         return false;
       }
     }
@@ -595,7 +613,7 @@ export default class RainbowHighlightPlugin extends Plugin {
       selectionOverlapsProtectedMarkdown(sourceText, selectionInfo)
     ) {
       new Notice(
-        "Rainbow Highlight: highlighting is unavailable inside code, math, links, or properties."
+        "Highlighting is unavailable inside code, math, links, or properties."
       );
       this.currentSelection = null;
       return;
@@ -705,7 +723,7 @@ export default class RainbowHighlightPlugin extends Plugin {
   private async showWelcomeOnce(): Promise<void> {
     if (this.settings.hasSeenWelcome) return;
     new Notice(
-      "Rainbow Highlight: select text to open the palette. Active colors can be removed with one click. / 选中文字即可打开调色盘，点击已选颜色可直接取消。",
+      "Select text to open the palette. Active colors can be removed with one click. / 选中文字即可打开调色盘，点击已选颜色可直接取消。",
       8000
     );
     await this.updateSettings({ hasSeenWelcome: true });
