@@ -188,12 +188,14 @@ function parseNativeHighlights(documentText: string): NativeHighlight[] {
 }
 
 function pluginTagRanges(documentText: string): HiddenRange[] {
-  return parsePluginMarks(documentText)
-    .flatMap((mark): HiddenRange[] => [
+  const ranges: HiddenRange[] = [];
+  for (const mark of parsePluginMarks(documentText)) {
+    ranges.push(
       { from: mark.from, to: mark.innerFrom, kind: "open" },
-      { from: mark.innerTo, to: mark.to, kind: "close" },
-    ])
-    .sort((a, b) => a.from - b.from || a.to - b.to);
+      { from: mark.innerTo, to: mark.to, kind: "close" }
+    );
+  }
+  return ranges.sort((a, b) => a.from - b.from || a.to - b.to);
 }
 
 function buildSearchView(documentText: string): {
@@ -417,10 +419,13 @@ function styledChunks(
 ): StyledChunk[] {
   const marks = parsePluginMarks(documentText)
     .filter((mark) => mark.from >= from && mark.to <= to);
-  const events: PluginMarkEvent[] = marks.flatMap((mark) => [
-    { from: mark.from, to: mark.innerFrom, type: "open", mark },
-    { from: mark.innerTo, to: mark.to, type: "close", mark },
-  ]);
+  const events: PluginMarkEvent[] = [];
+  for (const mark of marks) {
+    events.push(
+      { from: mark.from, to: mark.innerFrom, type: "open", mark },
+      { from: mark.innerTo, to: mark.to, type: "close", mark }
+    );
+  }
   events.sort((a, b) =>
     a.from - b.from || (a.type === "close" ? -1 : 1)
   );

@@ -137,10 +137,14 @@ function parseNativeHighlights(documentText) {
   return highlights;
 }
 function pluginTagRanges(documentText) {
-  return parsePluginMarks(documentText).flatMap((mark) => [
-    { from: mark.from, to: mark.innerFrom, kind: "open" },
-    { from: mark.innerTo, to: mark.to, kind: "close" }
-  ]).sort((a, b) => a.from - b.from || a.to - b.to);
+  const ranges = [];
+  for (const mark of parsePluginMarks(documentText)) {
+    ranges.push(
+      { from: mark.from, to: mark.innerFrom, kind: "open" },
+      { from: mark.innerTo, to: mark.to, kind: "close" }
+    );
+  }
+  return ranges.sort((a, b) => a.from - b.from || a.to - b.to);
 }
 function buildSearchView(documentText) {
   const hiddenRanges = pluginTagRanges(documentText);
@@ -285,10 +289,13 @@ function effectivePluginClasses(stack) {
 }
 function styledChunks(documentText, from, to) {
   const marks = parsePluginMarks(documentText).filter((mark) => mark.from >= from && mark.to <= to);
-  const events = marks.flatMap((mark) => [
-    { from: mark.from, to: mark.innerFrom, type: "open", mark },
-    { from: mark.innerTo, to: mark.to, type: "close", mark }
-  ]);
+  const events = [];
+  for (const mark of marks) {
+    events.push(
+      { from: mark.from, to: mark.innerFrom, type: "open", mark },
+      { from: mark.innerTo, to: mark.to, type: "close", mark }
+    );
+  }
   events.sort(
     (a, b) => a.from - b.from || (a.type === "close" ? -1 : 1)
   );
@@ -1067,9 +1074,7 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
         event.stopPropagation();
         this.suppressSelectionHandling();
         const action = isActive ? this.removeColor(editor, kind) : this.applyColor(editor, color, kind);
-        void action.finally(() => {
-          this.removePopover(true);
-        });
+        void this.finishPaletteAction(action);
       });
       row.appendChild(circle);
     });
@@ -1137,9 +1142,7 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
       event.stopPropagation();
       this.suppressSelectionHandling();
       const removal = action === "text" ? this.removeColor(editor, "text") : this.removeHighlight(editor);
-      void removal.finally(() => {
-        this.removePopover(true);
-      });
+      void this.finishPaletteAction(removal);
     });
     return button;
   }
@@ -1166,6 +1169,13 @@ var RainbowHighlightPlugin = class extends import_obsidian2.Plugin {
     const selection = activeWindow.getSelection();
     if (selection && !selection.isCollapsed)
       selection.removeAllRanges();
+  }
+  async finishPaletteAction(action) {
+    try {
+      await action;
+    } finally {
+      this.removePopover(true);
+    }
   }
   getSourceText(editor) {
     var _a, _b;

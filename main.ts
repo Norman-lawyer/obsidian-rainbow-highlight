@@ -430,9 +430,7 @@ export default class RainbowHighlightPlugin extends Plugin {
         const action = isActive
           ? this.removeColor(editor, kind)
           : this.applyColor(editor, color, kind);
-        void action.finally(() => {
-          this.removePopover(true);
-        });
+        void this.finishPaletteAction(action);
       });
       row.appendChild(circle);
     });
@@ -518,9 +516,7 @@ export default class RainbowHighlightPlugin extends Plugin {
       const removal = action === "text"
         ? this.removeColor(editor, "text")
         : this.removeHighlight(editor);
-      void removal.finally(() => {
-        this.removePopover(true);
-      });
+      void this.finishPaletteAction(removal);
     });
     return button;
   }
@@ -548,6 +544,14 @@ export default class RainbowHighlightPlugin extends Plugin {
   private clearDomSelection() {
     const selection = activeWindow.getSelection();
     if (selection && !selection.isCollapsed) selection.removeAllRanges();
+  }
+
+  private async finishPaletteAction(action: Promise<void>): Promise<void> {
+    try {
+      await action;
+    } finally {
+      this.removePopover(true);
+    }
   }
 
   private getSourceText(editor: Editor): string | null {
@@ -603,7 +607,7 @@ export default class RainbowHighlightPlugin extends Plugin {
     editor: Editor,
     color: HighlightColor,
     kind: HighlightKind
-  ) {
+  ): Promise<void> {
     let selectionInfo = this.currentSelection ?? getSelection(editor);
     if (!selectionInfo) return;
 
@@ -641,7 +645,10 @@ export default class RainbowHighlightPlugin extends Plugin {
     this.currentSelection = null;
   }
 
-  private async removeColor(editor: Editor, kind: HighlightKind) {
+  private async removeColor(
+    editor: Editor,
+    kind: HighlightKind
+  ): Promise<void> {
     const selectionInfo = this.getSelectionOrContainingMark(editor);
     if (!selectionInfo) return;
 
@@ -683,7 +690,7 @@ export default class RainbowHighlightPlugin extends Plugin {
       : null;
   }
 
-  private async removeHighlight(editor: Editor) {
+  private async removeHighlight(editor: Editor): Promise<void> {
     const selectionInfo = this.getSelectionOrContainingMark(editor);
     if (!selectionInfo) return;
 
