@@ -4,6 +4,10 @@ A beautiful multi-color text highlighting plugin for [Obsidian](https://obsidian
 
 一款简洁美观的 Obsidian 多彩文字高亮插件。
 
+[![release](https://img.shields.io/github/v/release/Norman-lawyer/obsidian-rainbow-highlight?label=release&color=6d4aff)](https://github.com/Norman-lawyer/obsidian-rainbow-highlight/releases/latest)
+[![Obsidian downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&query=%24%5B%22rainbow-highlight%22%5D.downloads&label=Obsidian%20downloads&color=339cff&cacheSeconds=3600)](https://community.obsidian.md/plugins/rainbow-highlight)
+[![license](https://img.shields.io/badge/license-MIT-22866b)](LICENSE)
+
 Select text and instantly apply a background highlight or text color from a floating palette — just like highlighting in a real book.
 
 选中文字后，浮动调色板会立即出现。你可以像使用真实荧光笔一样设置背景高亮或文字颜色。
